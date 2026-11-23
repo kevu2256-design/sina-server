@@ -52,6 +52,11 @@ BOOTAPPEND_FAILSAFE="boot=live components noeject hostname=sina-server username=
 # shim-signed/grub-efi-amd64-signed nachinstalliert. Ohne Indizes waere das
 # nicht moeglich und Secure Boot wuerde stillschweigend deaktiviert.
 #
+# Hinweis zu --chroot-squashfs-compression-level: live-build uebersetzt die
+# Option in "-Xcompression-level", das mksquashfs ausschliesslich fuer gzip
+# kennt. In Kombination mit "-type xz" bricht der Build daher ab; die
+# Kompressionsstufe wird deshalb bewusst nicht gesetzt (Standardwert).
+#
 # "noauto" verhindert eine Rekursion, weil lb config diese Datei selbst aufruft.
 exec lb config noauto \
 	--mode debian \
@@ -82,7 +87,6 @@ exec lb config noauto \
 	--linux-packages "linux-image" \
 	--chroot-filesystem squashfs \
 	--chroot-squashfs-compression-type xz \
-	--chroot-squashfs-compression-level 3 \
 	--initsystem systemd \
 	--initramfs live-boot \
 	--memtest none \

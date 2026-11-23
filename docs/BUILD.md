@@ -241,6 +241,7 @@ schlägt der Build fehl und es wird kein Release erstellt.
 | `debootstrap` scheitert an der Signatur | `ubuntu-keyring` fehlt oder Mirror-URL falsch (`SINA_MIRROR`) |
 | `No space left on device` | Speicher freiräumen; der Runner hat ca. 14 GB, der Build braucht ca. 6 GB |
 | `Kein UEFI-Booteintrag` | GRUB-EFI-Stage fehlgeschlagen – Build-Log ab `Begin installing grub-efi` prüfen |
+| `mksquashfs: Unrecognised compressor option -Xcompression-level` | `--chroot-squashfs-compression-level` entfernen – live-build erzeugt daraus eine Option, die `mksquashfs` nur für gzip kennt |
 | Release-Job: `Resource not accessible by integration` | Job-Berechtigung `contents: write` fehlt (im Workflow gesetzt) |
 | Artifact-Upload schlägt fehl (Speicherkontingent) | Die ISO ist ca. 1,5–2 GB. Bei privaten Repositories das Actions-Speicherkontingent beachten und ggf. `retention-days` in `.github/workflows/build-iso.yml` verringern |
 
