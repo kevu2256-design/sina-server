@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# Build-Artefakte (live-build Arbeitsverzeichnis: iso/)
+# ---------------------------------------------------------------------------
+/iso/.build/
+/iso/cache/
+/iso/chroot/
+/iso/binary/
+/iso/*.iso
+/iso/*.iso.zsync
+/iso/*.sha256
+/iso/*.packages
+/iso/*.contents
+/iso/*.files
+/iso/*.log
+/iso/binary.sh
+/iso/binary.modified_timestamps
+/iso/chroot.installed_tmp_pkgs
+/iso/chroot.package-lists
+
+# ---------------------------------------------------------------------------
+# Ergebnisse
+# ---------------------------------------------------------------------------
+/dist/
+*.log
+
+# ---------------------------------------------------------------------------
+# Vom Build erzeugte Dokumentationskopie im Image
+# ---------------------------------------------------------------------------
+/iso/config/includes.chroot/usr/share/doc/sina-server/
+
+# ---------------------------------------------------------------------------
+# Lokale Umgebung
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example

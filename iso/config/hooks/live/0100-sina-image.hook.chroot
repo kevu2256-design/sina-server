@@ -1,0 +1,79 @@
+#!/bin/sh
+# ---------------------------------------------------------------------------
+# 0100-sina-image.hook.chroot
+#
+# Laeuft waehrend des live-build-Chroot-Stage als root im Ziel-Dateisystem.
+# Richtet Dienstkonto, Rechte, Dienste, Locale und Tastatur ein und prueft die
+# mitgelieferten Skripte auf Syntaxfehler (dadurch schlaegt der Build frueh
+# fehl, wenn ein Skript fehlerhaft ist).
+# ---------------------------------------------------------------------------
+set -eu
+
+export DEBIAN_FRONTEND=noninteractive
+export LC_ALL=C
+
+echo "==== Sina Server: Image konfigurieren ===="
+
+# --- Dienstkonto fuer die Control API --------------------------------------
+if ! getent group sina-svc >/dev/null 2>&1; then
+	groupadd --system sina-svc
+fi
+if ! id -u sina-svc >/dev/null 2>&1; then
+	useradd --system --gid sina-svc --home-dir /var/lib/sina --no-create-home \
+		--shell /usr/sbin/nologin --comment "Sina Server Control API" sina-svc
+fi
+install -d -m 0750 -o sina-svc -g sina-svc /var/lib/sina
+install -d -m 0750 -o sina-svc -g sina-svc /var/log/sina
+
+# --- Rechte ---------------------------------------------------------------
+chown root:root /usr/local/bin/sina /usr/local/bin/sina-serverd \
+	/usr/local/sbin/sina-installer
+chmod 0755 /usr/local/bin/sina /usr/local/bin/sina-serverd \
+	/usr/local/sbin/sina-installer
+chmod 0644 /etc/sina/release
+
+if [ -d /usr/share/doc/sina-server ]; then
+	chmod 0644 /usr/share/doc/sina-server/* 2>/dev/null || true
+fi
+
+# --- Syntaxpruefung der ausgelieferten Skripte ----------------------------
+echo "Pruefe Sina-CLI und Installer"
+bash -n /usr/local/bin/sina
+bash -n /usr/local/sbin/sina-installer
+python3 -c "import py_compile; py_compile.compile('/usr/local/bin/sina-serverd', cfile='/tmp/sina-serverd.pyc', doraise=True)"
+
+# --- Dienste aktivieren ---------------------------------------------------
+systemctl enable NetworkManager.service
+systemctl enable sina-serverd.service
+systemctl enable systemd-timesyncd.service >/dev/null 2>&1 || true
+
+# --- Live-spezifische Reste entfernen -------------------------------------
+rm -f /etc/machine-id
+rm -f /var/lib/dbus/machine-id
+# Hostschluessel neu erzeugen, damit sshd auch im Live-System startet.
+# sina-installer erzeugt bei einer Installation eigene Schluessel.
+rm -f /etc/ssh/ssh_host_*
+if [ -x /usr/bin/ssh-keygen ]; then
+	ssh-keygen -A >/dev/null 2>&1 || echo "WARNUNG: ssh-keygen -A fehlgeschlagen"
+fi
+# /etc/sudoers.d/live legt live-config beim Booten selbst an.
+rm -f /etc/sudoers.d/live
+
+# --- Locale und Tastatur --------------------------------------------------
+if [ -f /etc/locale.gen ]; then
+	sed -i -e 's/^# *\(de_DE.UTF-8 UTF-8\)/\1/' \
+		-e 's/^# *\(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen
+fi
+if [ -x /usr/sbin/locale-gen ]; then
+	locale-gen >/dev/null 2>&1 || echo "WARNUNG: locale-gen fehlgeschlagen"
+fi
+printf 'LANG=de_DE.UTF-8\nLANGUAGE=de_DE:de\n' >/etc/default/locale
+
+if [ -f /etc/default/keyboard ]; then
+	sed -i -e 's/^XKBLAYOUT=.*/XKBLAYOUT="de"/' \
+		-e 's/^XKBVARIANT=.*/XKBVARIANT=""/' /etc/default/keyboard
+fi
+
+rm -rf /tmp/* /var/tmp/* 2>/dev/null || true
+
+echo "==== Sina Server: Image konfiguriert ===="

@@ -1,0 +1,36 @@
+[Unit]
+Description=Sina Server Control API
+Documentation=file:///usr/share/doc/sina-server/INSTALLATION.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sina-svc
+Group=sina-svc
+Environment=SINA_HOST=127.0.0.1
+Environment=SINA_PORT=8787
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/local/bin/sina-serverd
+Restart=on-failure
+RestartSec=3s
+StateDirectory=sina
+LogsDirectory=sina
+
+# Absicherung des Dienstes
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

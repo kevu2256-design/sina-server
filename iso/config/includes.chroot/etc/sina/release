@@ -1,0 +1,16 @@
+# ---------------------------------------------------------------------------
+# Sina Server - Release-Informationen
+#
+# Diese Datei wird beim Build von scripts/build-iso.sh neu erzeugt
+# (Version aus VERSION, Build-ID und Build-Datum aus der Build-Umgebung).
+# Format: KEY=Wert (ohne Anfuehrungszeichen), ein Schluessel pro Zeile.
+# ---------------------------------------------------------------------------
+PRODUCT=Sina Server
+VERSION=1.2.7
+EDITION=Standard Edition
+CODENAME=standard
+BASE_DISTRIBUTION=Ubuntu 24.04 LTS (noble)
+BASE_ARCH=amd64
+BUILD_ID=unversioniert
+BUILD_DATE=1970-01-01T00:00:00Z
+BUILD_SOURCE=Lokaler Build

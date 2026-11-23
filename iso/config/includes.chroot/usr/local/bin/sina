@@ -1,0 +1,398 @@
+#!/bin/bash
+# ---------------------------------------------------------------------------
+# sina - Sina Server CLI
+#
+# Zentrale Verwaltungswerkzeug der Sina-Server-Images (Live und installiert).
+# Das Skript verwendet ausschliesslich Werkzeuge, die im Image enthalten sind
+# (systemd, NetworkManager, python3, iproute2, util-linux).
+# ---------------------------------------------------------------------------
+set -u
+set -o pipefail
+
+PROGRAM=${0##*/}
+RELEASE_FILE=${SINA_RELEASE_FILE:-/etc/sina/release}
+SERVICE_UNIT=sina-serverd.service
+NM_UNIT=NetworkManager.service
+
+# --- Farben (nur auf einem Terminal) ---------------------------------------
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then
+	C_BOLD=$(printf '\033[1m')
+	C_DIM=$(printf '\033[2m')
+	C_OK=$(printf '\033[32m')
+	C_WARN=$(printf '\033[33m')
+	C_ERR=$(printf '\033[31m')
+	C_OFF=$(printf '\033[0m')
+else
+	C_BOLD='' C_DIM='' C_OK='' C_WARN='' C_ERR='' C_OFF=''
+fi
+
+# --- Hilfsfunktionen -------------------------------------------------------
+die() {
+	printf '%sFEHLER:%s %s\n' "${C_ERR}" "${C_OFF}" "$*" >&2
+	exit 1
+}
+
+warn() {
+	printf '%sWARNUNG:%s %s\n' "${C_WARN}" "${C_OFF}" "$*" >&2
+}
+
+have() {
+	command -v "$1" >/dev/null 2>&1
+}
+
+require_root() {
+	[ "$(id -u)" -eq 0 ] || die "Dieser Befehl benoetigt Root-Rechte. Bitte 'sudo ${PROGRAM} $*' verwenden."
+}
+
+# Liest einen Wert aus /etc/sina/release (Format KEY=Wert).
+release_get() {
+	local key=$1 line
+	[ -r "${RELEASE_FILE}" ] || return 1
+	while IFS= read -r line; do
+		case "${line}" in
+			"${key}="*) printf '%s\n' "${line#*=}"; return 0 ;;
+		esac
+	done <"${RELEASE_FILE}"
+	return 1
+}
+
+release_or() {
+	local value
+	if value=$(release_get "$1"); then
+		printf '%s\n' "${value}"
+	else
+		printf '%s\n' "$2"
+	fi
+}
+
+service_state() {
+	local unit=$1
+	if have systemctl; then
+		systemctl is-active "${unit}" 2>/dev/null || true
+	else
+		printf 'unbekannt\n'
+	fi
+}
+
+state_marker() {
+	case "$1" in
+		active) printf '%s%s%s' "${C_OK}" "$1" "${C_OFF}" ;;
+		failed|inactive) printf '%s%s%s' "${C_ERR}" "$1" "${C_OFF}" ;;
+		*) printf '%s%s%s' "${C_WARN}" "$1" "${C_OFF}" ;;
+	esac
+}
+
+# --- Befehle ---------------------------------------------------------------
+cmd_version() {
+	printf '%s%s %s%s\n' "${C_BOLD}" \
+		"$(release_or PRODUCT 'Sina Server')" \
+		"$(release_or VERSION 'unbekannt')" \
+		"${C_OFF}"
+	printf 'Edition .......... %s\n' "$(release_or EDITION 'Standard Edition')"
+	printf 'Basis ............ %s\n' "$(release_or BASE_DISTRIBUTION 'unbekannt')"
+	printf 'Architektur ...... %s\n' "$(release_or BASE_ARCH "$(uname -m)")"
+	printf 'Build-ID ......... %s\n' "$(release_or BUILD_ID 'unversioniert')"
+	printf 'Build-Datum ...... %s\n' "$(release_or BUILD_DATE 'unbekannt')"
+	printf 'Quelle ........... %s\n' "$(release_or BUILD_SOURCE 'unbekannt')"
+}
+
+cmd_status() {
+	local mem_total mem_avail mem_used_pct root_usage
+	printf '%s%s %s (%s)%s\n' "${C_BOLD}" \
+		"$(release_or PRODUCT 'Sina Server')" \
+		"$(release_or VERSION '?')" \
+		"$(release_or EDITION '?')" "${C_OFF}"
+	printf '%s\n' "${C_DIM}------------------------------------------------------${C_OFF}"
+
+	printf 'Hostname ......... %s\n' "$(uname -n)"
+	printf 'Kernel ........... %s\n' "$(uname -sr)"
+	printf 'Laufzeit ......... %s\n' "$(uptime -p 2>/dev/null || uptime)"
+	printf 'Systemzeit ....... %s\n' "$(date '+%d.%m.%Y %H:%M:%S %Z')"
+	printf 'Basis ............ %s\n' "$(release_or BASE_DISTRIBUTION 'unbekannt')"
+
+	if [ -r /etc/os-release ]; then
+		printf 'Betriebssystem ... %s\n' \
+			"$(. /etc/os-release 2>/dev/null && printf '%s' "${PRETTY_NAME:-unbekannt}")"
+	fi
+
+	printf '%s\n' ""
+	printf '%sDienste%s\n' "${C_BOLD}" "${C_OFF}"
+	printf '  %-22s %s\n' "${SERVICE_UNIT}" "$(state_marker "$(service_state "${SERVICE_UNIT}")")"
+	printf '  %-22s %s\n' "${NM_UNIT}" "$(state_marker "$(service_state "${NM_UNIT}")")"
+
+	printf '%s\n' ""
+	printf '%sNetzwerk%s\n' "${C_BOLD}" "${C_OFF}"
+	if have ip; then
+		ip -brief address show 2>/dev/null | sed 's/^/  /' || warn "Schnittstellen konnten nicht gelesen werden."
+		printf '  Standardroute: %s\n' "$(ip route show default 2>/dev/null | head -n 1 || true)"
+	else
+		printf '  iproute2 ist nicht installiert.\n'
+	fi
+
+	printf '%s\n' ""
+	printf '%sRessourcen%s\n' "${C_BOLD}" "${C_OFF}"
+	if [ -r /proc/meminfo ]; then
+		mem_total=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+		mem_avail=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
+		if [ -n "${mem_total}" ] && [ -n "${mem_avail}" ] && [ "${mem_total}" -gt 0 ] 2>/dev/null; then
+			mem_used_pct=$(((mem_total - mem_avail) * 100 / mem_total))
+			printf '  Arbeitsspeicher: %s MiB von %s MiB belegt (%s%%)\n' \
+				"$(((mem_total - mem_avail) / 1024))" "$((mem_total / 1024))" "${mem_used_pct}"
+		fi
+	fi
+	if have df; then
+		root_usage=$(df -h / 2>/dev/null | awk 'NR==2 {print $5 " belegt, " $4 " frei"}')
+		printf '  Wurzeldateisystem: %s\n' "${root_usage:-unbekannt}"
+	fi
+}
+
+cmd_net() {
+	local action=${1:-status}
+	have nmcli || die "NetworkManager (nmcli) ist nicht installiert."
+
+	case "${action}" in
+		status)
+			nmcli general status
+			printf '%s\n' ""
+			nmcli device status
+			;;
+		wifi)
+			have rfkill && rfkill unblock wifi 2>/dev/null
+			nmcli device wifi list
+			;;
+		connect)
+			[ $# -ge 2 ] || die "Verwendung: ${PROGRAM} net connect <SSID>"
+			require_root net connect "$2"
+			# --ask fragt das Passwort interaktiv ab; es erscheint niemals
+			# in der Shell-Historie oder in Prozessargumenten.
+			nmcli --ask device wifi connect "$2"
+			;;
+		on|off)
+			require_root "net ${action}"
+			nmcli networking "${action}"
+			;;
+		*)
+			die "Unbekannter Netzwerkbefehl '${action}'. Verwendung: ${PROGRAM} net [status|wifi|connect <SSID>|on|off]"
+			;;
+	esac
+}
+
+cmd_user() {
+	local action=${1:-list} name
+
+	case "${action}" in
+		list)
+			awk -F: '$3 >= 1000 && $3 < 65534 {printf "%-20s %s\n", $1, $6}' /etc/passwd
+			;;
+		add)
+			[ $# -ge 2 ] || die "Verwendung: ${PROGRAM} user add <benutzername> [--admin]"
+			name=$2
+			require_root user add "${name}"
+			printf '%s\n' "${name}" | grep -Eq '^[a-z][a-z0-9_-]{1,31}$' \
+				|| die "Ungueltiger Benutzername '${name}' (a-z, 0-9, _-, 2-32 Zeichen)."
+			if id -u "${name}" >/dev/null 2>&1; then
+				die "Benutzer '${name}' existiert bereits."
+			fi
+			# adduser fragt das Passwort interaktiv ab.
+			adduser --gecos "" "${name}"
+			if [ "${3:-}" = "--admin" ]; then
+				usermod -aG sudo "${name}"
+				printf 'Benutzer %s wurde zur Gruppe sudo hinzugefuegt.\n' "${name}"
+			fi
+			;;
+		groups)
+			[ $# -ge 2 ] || die "Verwendung: ${PROGRAM} user groups <benutzername>"
+			groups "$2"
+			;;
+		*)
+			die "Unbekannter Benutzerbefehl '${action}'. Verwendung: ${PROGRAM} user [list|add|groups]"
+			;;
+	esac
+}
+
+cmd_service() {
+	local action=${1:-} unit=${2:-}
+	[ -n "${action}" ] || die "Verwendung: ${PROGRAM} service <status|start|stop|restart> [dienst]"
+
+	case "${action}" in
+		status)
+			if [ -n "${unit}" ]; then
+				systemctl status "${unit}" --no-pager || true
+			else
+				local u
+				for u in "${SERVICE_UNIT}" "${NM_UNIT}"; do
+					printf '%-24s %s\n' "${u}" "$(service_state "${u}")"
+				done
+			fi
+			;;
+		start|stop|restart)
+			[ -n "${unit}" ] || die "Verwendung: ${PROGRAM} service ${action} <dienst>"
+			case "${unit}" in
+				"${SERVICE_UNIT}"|"${NM_UNIT}") : ;;
+				*) die "Dienst '${unit}' ist nicht freigegeben (erlaubt: ${SERVICE_UNIT}, ${NM_UNIT})." ;;
+			esac
+			require_root service "${action}" "${unit}"
+			systemctl "${action}" "${unit}"
+			;;
+		*)
+			die "Unbekannte Aktion '${action}'. Verwendung: ${PROGRAM} service <status|start|stop|restart>"
+			;;
+	esac
+}
+
+cmd_logs() {
+	local follow=''
+	[ "${1:-}" = "-f" ] && follow='-f'
+	have journalctl || die "journalctl ist nicht verfuegbar."
+	# shellcheck disable=SC2086
+	journalctl -u "${SERVICE_UNIT}" -n 200 --no-pager ${follow}
+}
+
+cmd_update() {
+	local answer
+	require_root update
+	printf 'Paketlisten werden aktualisiert und das System wird aktualisiert.\n'
+	printf 'Fortfahren? [j/N] '
+	read -r answer
+	case "${answer}" in
+		j|J|y|Y) : ;;
+		*) printf 'Abgebrochen.\n'; return 0 ;;
+	esac
+	apt-get update
+	DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade
+	printf 'Aktualisierung abgeschlossen. Ein Neustart kann erforderlich sein.\n'
+}
+
+cmd_install() {
+	[ -x /usr/local/sbin/sina-installer ] || die "sina-installer wurde nicht gefunden."
+	require_root install
+	exec /usr/local/sbin/sina-installer "$@"
+}
+
+cmd_doctor() {
+	local failures=0 free_kb
+
+	report() {
+		local state=$1 text=$2
+		case "${state}" in
+			ok) printf '  %s[ OK ]%s   %s\n' "${C_OK}" "${C_OFF}" "${text}" ;;
+			warn) printf '  %s[WARN]%s   %s\n' "${C_WARN}" "${C_OFF}" "${text}" ;;
+			fail)
+				printf '  %s[FEHL]%s   %s\n' "${C_ERR}" "${C_OFF}" "${text}"
+				failures=$((failures + 1))
+				;;
+		esac
+	}
+
+	printf '%sSystempruefung%s\n' "${C_BOLD}" "${C_OFF}"
+
+	if [ -r "${RELEASE_FILE}" ] && [ -n "$(release_get VERSION || true)" ]; then
+		report ok "Release-Information vorhanden ($(release_get VERSION))."
+	else
+		report fail "Release-Information ${RELEASE_FILE} fehlt oder ist unvollstaendig."
+	fi
+
+	if have python3; then
+		report ok "python3 vorhanden ($(python3 --version 2>&1 | head -n 1))."
+	else
+		report fail "python3 fehlt; sina-serverd kann nicht starten."
+	fi
+
+	if [ "$(service_state "${SERVICE_UNIT}")" = "active" ]; then
+		report ok "Dienst ${SERVICE_UNIT} laeuft."
+	else
+		report fail "Dienst ${SERVICE_UNIT} laeuft nicht (systemctl status ${SERVICE_UNIT})."
+	fi
+
+	if [ "$(service_state "${NM_UNIT}")" = "active" ]; then
+		report ok "NetworkManager laeuft."
+	else
+		report warn "NetworkManager laeuft nicht (kein Netzwerkbetrieb)."
+	fi
+
+	if have ip && ip route show default 2>/dev/null | grep -q default; then
+		report ok "Standardroute vorhanden."
+	else
+		report warn "Keine Standardroute; Netzwerk eventuell nicht konfiguriert."
+	fi
+
+	if have df; then
+		free_kb=$(df -Pk / 2>/dev/null | awk 'NR==2 {print $4}')
+		if [ -n "${free_kb}" ] && [ "${free_kb}" -ge 1048576 ] 2>/dev/null; then
+			report ok "Freier Speicher auf /: $((free_kb / 1024)) MiB."
+		else
+			report warn "Wenig freier Speicher auf / ($((${free_kb:-0} / 1024)) MiB)."
+		fi
+	fi
+
+	if [ -w /var/lib/sina ] || [ "$(id -u)" -eq 0 ]; then
+		report ok "Datenverzeichnis /var/lib/sina ist beschreibbar."
+	else
+		report warn "/var/lib/sina ist fuer den aktuellen Benutzer nicht beschreibbar."
+	fi
+
+	printf '%s\n' ""
+	if [ "${failures}" -eq 0 ]; then
+		printf '%sAlle Pflichtpruefungen bestanden.%s\n' "${C_OK}" "${C_OFF}"
+		return 0
+	fi
+	printf '%s%d Pflichtpruefung(en) fehlgeschlagen.%s\n' "${C_ERR}" "${failures}" "${C_OFF}"
+	return 1
+}
+
+usage() {
+	cat <<EOF
+${C_BOLD}${PROGRAM}${C_OFF} - Sina Server $(release_or VERSION '') $(release_or EDITION '')
+
+Aufruf: ${PROGRAM} <befehl> [optionen]
+
+Befehle:
+  version                     Version, Edition und Build-Informationen
+  status                      Systemstatus (Dienste, Netzwerk, Ressourcen)
+  doctor                      Systempruefung mit OK/WARN/FEHL-Meldungen
+  net [status|wifi|connect <SSID>|on|off]
+                              Netzwerk mit NetworkManager verwalten
+  user list|add <name> [--admin]|groups <name>
+                              Benutzerverwaltung (add/groups benoetigen Root)
+  service status|start|stop|restart [dienst]
+                              Dienste steuern (sina-serverd, NetworkManager)
+  logs [-f]                   Log des Sina-Server-Dienstes anzeigen
+  update                      System aktualisieren (apt dist-upgrade)
+  install                     Sina Server auf einen Datentraeger installieren
+  help                        Diese Hilfe
+
+Beispiele:
+  sudo ${PROGRAM} install
+  sudo ${PROGRAM} net connect MeinWLAN
+  sudo ${PROGRAM} user add admin --admin
+  ${PROGRAM} doctor
+EOF
+}
+
+main() {
+	local command=${1:-help}
+	[ $# -gt 0 ] && shift
+
+	case "${command}" in
+		help|-h|--help) usage ;;
+		version|-V|--version) cmd_version ;;
+		status|info) cmd_status ;;
+		doctor|check) cmd_doctor ;;
+		net|network) cmd_net "$@" ;;
+		user) cmd_user "$@" ;;
+		service) cmd_service "$@" ;;
+		logs|log) cmd_logs "$@" ;;
+		update) cmd_update ;;
+		install) cmd_install "$@" ;;
+		*)
+			printf '%sUnbekannter Befehl: %s%s\n\n' "${C_ERR}" "${command}" "${C_OFF}" >&2
+			usage >&2
+			exit 2
+			;;
+	esac
+}
+
+main "$@"
+
+
+

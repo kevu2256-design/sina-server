@@ -1,0 +1,12 @@
+Sina Server 1.2.7 - Standard Edition
+====================================
+
+  Version anzeigen ......... sina version
+  Systemstatus ............. sina status
+  Netzwerk verwalten ....... sina net
+  Systempruefung ........... sina doctor
+  Auf Datentraeger installieren ... sudo sina install
+  Alle Befehle ............. sina help
+
+  Hinweis: Die Live-Sitzung laeuft ohne Passwort (automatische Anmeldung).
+  Bei einer Installation auf Datentraeger wird ein Passwort vergeben.

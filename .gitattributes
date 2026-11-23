@@ -1,0 +1,17 @@
+# Alle Textdateien im Repository mit LF (Unix) abschliessen.
+# Wichtig fuer Shell-Skripte, live-build-Hooks und Workflow-Dateien:
+# CRLF wuerde Shebangs wie "#!/bin/sh\r" zerstoeren.
+* text=auto eol=lf
+
+*.sh            text eol=lf
+*.hook.chroot   text eol=lf
+*.hook.binary   text eol=lf
+*.list.chroot   text eol=lf
+*.cfg.chroot    text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+VERSION         text eol=lf
+
+# Binaere Artefakte nicht konvertieren
+*.iso           binary
+*.sha256        text eol=lf

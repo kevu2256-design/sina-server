@@ -1,0 +1,284 @@
+name: Sina Server ISO
+
+# Baut die bootfaehige ISO von Sina Server und veroeffentlicht sie als
+# Artifact. Bei einem Versions-Tag (v1.2.7) wird zusaetzlich ein GitHub
+# Release erstellt.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+
+# Minimale Rechte: der Build liest nur das Repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: sina-iso-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SINA_BASE_DISTRO: noble
+  SINA_ARCH: amd64
+  SINA_EDITION: Standard Edition
+  # live-build wird versioniert installiert und per SHA256 geprueft.
+  LB_DEB_URL: http://deb.debian.org/debian/pool/main/l/live-build/live-build_20230502_all.deb
+  LB_DEB_SHA256: a863905724e7b69d45066ebab113cb6de12a11984349847ad49f6151c10f017d
+
+jobs:
+  build:
+    name: ISO bauen und pruefen
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Version ermitteln
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(tr -d ' \t\r\n' < VERSION)
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::VERSION enthaelt keine gueltige Version: '$version'"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Sina Server $version (Standard Edition)"
+            echo ""
+            echo "- Basis: Ubuntu 24.04 LTS (noble) / amd64"
+            echo "- Runner: ubuntu-24.04"
+            echo "- Commit: \`$GITHUB_SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tag mit VERSION abgleichen
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          expected="v${{ steps.version.outputs.version }}"
+          if [ "${GITHUB_REF_NAME}" != "$expected" ]; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' passt nicht zur Version in VERSION ('$expected')."
+            exit 1
+          fi
+          echo "Tag ${GITHUB_REF_NAME} passt zur Version."
+
+      - name: Freien Speicherplatz schaffen
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
+      - name: Build-Abhaengigkeiten installieren
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            debootstrap xorriso squashfs-tools isolinux syslinux syslinux-common \
+            syslinux-utils dosfstools mtools rsync file wget curl ca-certificates \
+            shellcheck
+          curl -fsSL -o /tmp/live-build.deb "$LB_DEB_URL"
+          echo "$LB_DEB_SHA256  /tmp/live-build.deb" | sha256sum --check --strict
+          sudo apt-get install -y --no-install-recommends /tmp/live-build.deb
+          lb --version
+          debootstrap --version
+          xorriso --version | head -n 1
+
+      - name: Shell- und Python-Skripte statisch pruefen
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          shellcheck --severity=warning scripts/*.sh
+          shellcheck --severity=warning \
+            iso/config/includes.chroot/usr/local/bin/sina \
+            iso/config/includes.chroot/usr/local/sbin/sina-installer
+          shellcheck --severity=warning -s sh iso/auto/config
+          for hook in iso/config/hooks/live/*.hook.chroot; do
+            shellcheck --severity=warning -s sh "$hook"
+          done
+          python3 -c "import ast,sys; ast.parse(open(sys.argv[1], encoding='utf-8').read())" \
+            iso/config/includes.chroot/usr/local/bin/sina-serverd
+          echo "Alle Skripte syntaktisch in Ordnung."
+
+      - name: ISO bauen
+        env:
+          SINA_BUILD_SOURCE: "GitHub Actions (${{ github.workflow }}, ${{ github.repository }}, ${{ github.ref_name }})"
+        run: |
+          set -euo pipefail
+          sudo -E bash scripts/build-iso.sh
+
+      - name: ISO validieren
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          iso="dist/Sina-Server-${version}-amd64.iso"
+          ls -l "$iso"
+          bash scripts/validate-iso.sh "$iso" --require-efi
+
+      - name: SHA256-Pruefsumme erzeugen und pruefen
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          iso="dist/Sina-Server-${version}-amd64.iso"
+          bash scripts/generate-checksum.sh "$iso"
+          (cd dist && sha256sum -c "$(basename "$iso").sha256")
+
+      - name: Build-Informationen und Release-Notizen erzeugen
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          iso="dist/Sina-Server-${version}-amd64.iso"
+          checksum=$(cut -d' ' -f1 "${iso}.sha256")
+
+          {
+            echo "Produkt:        Sina Server ${version} Standard Edition"
+            echo "Datei:          $(basename "$iso")"
+            echo "Groesse:        $(stat -c %s "$iso") Bytes"
+            echo "SHA256:         ${checksum}"
+            echo "Basis:          Ubuntu 24.04 LTS (noble), amd64"
+            echo "Bootloader:     isolinux (BIOS) + GRUB (UEFI)"
+            echo "Build-Werkzeug: live-build 20230502 (Debian, SHA256-geprueft)"
+            echo "Build-Runner:   ubuntu-24.04"
+            echo "Commit:         ${GITHUB_SHA}"
+            echo "Ref:            ${GITHUB_REF}"
+            echo "Workflow-Lauf:  ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "Erstellt:       $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          } > dist/BUILD-INFO.txt
+
+          cat > dist/RELEASE-NOTES.md <<EOF
+          # Sina Server ${version} - Standard Edition
+
+          Bootfaehiges Installations- und Live-Image auf Basis von Ubuntu 24.04 LTS (amd64).
+
+          ## Enthalten
+
+          - Sina Server ${version} (Standard Edition) mit \`sina\`-CLI und \`sina-serverd\`
+          - NetworkManager inkl. WLAN-Unterstuetzung
+          - sudo- und Benutzerverwaltung
+          - Installer \`sina-installer\` fuer die Installation auf Datentraeger
+          - GRUB fuer UEFI und BIOS, isolinux-Bootmenue
+
+          ## Dateien
+
+          | Datei | Beschreibung |
+          | --- | --- |
+          | \`Sina-Server-${version}-amd64.iso\` | Bootfaehiges ISO-Abbild |
+          | \`Sina-Server-${version}-amd64.iso.sha256\` | SHA256-Pruefsumme |
+          | \`BUILD-INFO.txt\` | Build-Informationen |
+
+          ## Installation (Kurzfassung)
+
+          1. ISO herunterladen und Pruefsumme vergleichen:
+             \`\`\`bash
+             sha256sum -c Sina-Server-${version}-amd64.iso.sha256
+             \`\`\`
+          2. ISO mit Rufus, balenaEtcher oder \`dd\` auf einen USB-Stick schreiben.
+          3. Vom Stick booten (UEFI oder BIOS).
+          4. Live-System starten, danach \`sudo sina install\` ausfuehren.
+
+          Ausfuehrliche Anleitung: \`docs/INSTALLATION.md\` im Repository.
+
+          ## Build-Informationen
+
+          - Build-ID (Commit): \`${GITHUB_SHA}\`
+          - Workflow: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          - SHA256: \`${checksum}\`
+          EOF
+
+          cat dist/BUILD-INFO.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: ISO als Artifact hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sina-Server-${{ steps.version.outputs.version }}-ISO
+          path: |
+            dist/Sina-Server-${{ steps.version.outputs.version }}-amd64.iso
+            dist/Sina-Server-${{ steps.version.outputs.version }}-amd64.iso.sha256
+            dist/BUILD-INFO.txt
+            dist/RELEASE-NOTES.md
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Build-Protokoll bei Fehlschlag hochladen
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sina-Server-${{ steps.version.outputs.version }}-build-log
+          path: |
+            build.log
+            iso/build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  release:
+    name: GitHub Release erstellen
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Schreibrechte nur fuer diesen Job (Release anlegen).
+    permissions:
+      contents: write
+    steps:
+      - name: Artifact herunterladen
+        uses: actions/download-artifact@v4
+        with:
+          name: Sina-Server-${{ needs.build.outputs.version }}-ISO
+          path: release
+
+      - name: Dateien und Pruefsumme vor der Veroeffentlichung pruefen
+        run: |
+          set -euo pipefail
+          cd release
+          ls -l
+
+          shopt -s nullglob
+          isos=(./*.iso)
+          shopt -u nullglob
+          if [ "${#isos[@]}" -ne 1 ]; then
+            echo "::error::Genau eine ISO-Datei erwartet, gefunden: ${#isos[@]}"
+            exit 1
+          fi
+          iso="${isos[0]}"
+
+          test -s "$iso" || { echo "::error::ISO ist leer oder fehlt."; exit 1; }
+          test -f "${iso}.sha256" || { echo "::error::Pruefsummendatei fehlt."; exit 1; }
+          sha256sum -c "${iso}.sha256"
+          echo "ISO und Pruefsumme sind unversehrt."
+
+      - name: Release veroeffentlichen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          isos=(release/*.iso)
+          shopt -u nullglob
+          if [ "${#isos[@]}" -ne 1 ]; then
+            echo "::error::Genau eine ISO-Datei erwartet, gefunden: ${#isos[@]}"
+            exit 1
+          fi
+          iso="${isos[0]}"
+
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG existiert bereits - Dateien werden ersetzt."
+            gh release upload "$TAG" \
+              "$iso" "${iso}.sha256" release/BUILD-INFO.txt \
+              --repo "$REPO" --clobber
+          else
+            gh release create "$TAG" \
+              "$iso" "${iso}.sha256" release/BUILD-INFO.txt \
+              --repo "$REPO" \
+              --title "Sina Server $VERSION - Standard Edition" \
+              --notes-file release/RELEASE-NOTES.md \
+              --verify-tag
+          fi
+

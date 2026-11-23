@@ -1,0 +1,105 @@
+#!/bin/sh
+# ---------------------------------------------------------------------------
+# Sina Server - live-build Konfiguration
+#
+# Wird von "lb config" (bzw. "lb build") automatisch ausgefuehrt, weil die
+# Datei als iso/auto/config im live-build-Projektverzeichnis liegt.
+#
+# Alle verwendeten Optionen sind Optionen von live-build 1:20230502
+# (Debian bookworm), das in der Pipeline versioniert und per SHA256 geprueft
+# installiert wird. Siehe docs/BUILD.md.
+# ---------------------------------------------------------------------------
+set -eu
+
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+PROJECT_DIR=$(CDPATH='' cd -- "${SCRIPT_DIR}/../.." && pwd)
+
+VERSION=$(tr -d ' \t\r\n' < "${PROJECT_DIR}/VERSION")
+EDITION=${SINA_EDITION:-Standard Edition}
+
+DISTRIBUTION=${SINA_BASE_DISTRO:-noble}
+ARCHITECTURE=${SINA_ARCH:-amd64}
+MIRROR=${SINA_MIRROR:-http://archive.ubuntu.com/ubuntu/}
+SECURITY_MIRROR=${SINA_SECURITY_MIRROR:-http://security.ubuntu.com/ubuntu/}
+ARCHIVE_AREAS=${SINA_ARCHIVE_AREAS:-main restricted universe multiverse}
+IMAGE_NAME=${SINA_IMAGE_NAME:-sina-server}
+
+# Versionsschema pruefen: live-build und die Release-Pipeline erwarten X.Y.Z
+case "${VERSION}" in
+	[0-9]*.[0-9]*.[0-9]*) : ;;
+	*)
+		echo "FEHLER: '${VERSION}' aus VERSION ist keine Version im Schema X.Y.Z" >&2
+		exit 1
+		;;
+esac
+
+# ISO-9660-Volume-Label: maximal 32 Zeichen, nur A-Z, 0-9 und "_"
+ISO_VOLUME=$(printf 'SINA_SERVER_%s_%s' \
+	"$(printf '%s' "${VERSION}" | tr '.' '_')" \
+	"${ARCHITECTURE}" | tr '[:lower:]' '[:upper:]')
+
+# Bootparameter:
+#   live-boot:   boot=live, components, noeject (Medium nicht auswerfen)
+#   live-config: hostname, username, locales, keyboard-layouts, timezone
+# Die Namen der live-config-Parameter entsprechen live-config 11.0.4
+# (lib/live/config/00*): hostname=, username=, locales=, timezone=,
+# keyboard-layouts=.
+BOOTAPPEND_LIVE="boot=live components quiet noeject hostname=sina-server username=sina locales=de_DE.UTF-8 keyboard-layouts=de timezone=Europe/Berlin"
+BOOTAPPEND_FAILSAFE="boot=live components noeject hostname=sina-server username=sina locales=de_DE.UTF-8"
+
+# Hinweis zu --apt-indices: Die Indizes bleiben im Image (Standard), weil
+# live-build in der Binary-Stage bei --uefi-secure-boot auto noch
+# shim-signed/grub-efi-amd64-signed nachinstalliert. Ohne Indizes waere das
+# nicht moeglich und Secure Boot wuerde stillschweigend deaktiviert.
+#
+# "noauto" verhindert eine Rekursion, weil lb config diese Datei selbst aufruft.
+exec lb config noauto \
+	--mode debian \
+	--system live \
+	--distribution "${DISTRIBUTION}" \
+	--parent-distribution "${DISTRIBUTION}" \
+	--architecture "${ARCHITECTURE}" \
+	--archive-areas "${ARCHIVE_AREAS}" \
+	--parent-archive-areas "${ARCHIVE_AREAS}" \
+	--mirror-bootstrap "${MIRROR}" \
+	--mirror-chroot "${MIRROR}" \
+	--mirror-chroot-security "${SECURITY_MIRROR}" \
+	--mirror-binary "${MIRROR}" \
+	--mirror-binary-security "${SECURITY_MIRROR}" \
+	--parent-mirror-bootstrap "${MIRROR}" \
+	--parent-mirror-chroot "${MIRROR}" \
+	--parent-mirror-chroot-security "${SECURITY_MIRROR}" \
+	--parent-mirror-binary "${MIRROR}" \
+	--parent-mirror-binary-security "${SECURITY_MIRROR}" \
+	--keyring-packages ubuntu-keyring \
+	--security true \
+	--updates true \
+	--backports false \
+	--binary-image iso-hybrid \
+	--bootloaders "syslinux,grub-efi" \
+	--uefi-secure-boot auto \
+	--linux-flavours generic \
+	--linux-packages "linux-image" \
+	--chroot-filesystem squashfs \
+	--chroot-squashfs-compression-type xz \
+	--chroot-squashfs-compression-level 3 \
+	--initsystem systemd \
+	--initramfs live-boot \
+	--memtest none \
+	--debian-installer none \
+	--firmware-chroot true \
+	--apt-indices true \
+	--apt-recommends true \
+	--apt-secure true \
+	--source false \
+	--cache false \
+	--checksums sha256 \
+	--image-name "${IMAGE_NAME}" \
+	--iso-application "Sina Server ${VERSION} ${EDITION}" \
+	--iso-publisher "Sina Server Projekt" \
+	--iso-volume "${ISO_VOLUME}" \
+	--bootappend-live "${BOOTAPPEND_LIVE}" \
+	--bootappend-live-failsafe "${BOOTAPPEND_FAILSAFE}" \
+	--utc-time true \
+	--verbose \
+	"$@"

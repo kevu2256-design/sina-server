@@ -1,0 +1,389 @@
+#!/bin/bash
+# ---------------------------------------------------------------------------
+# sina-installer - Installiert Sina Server vom Live-Medium auf einen Datentraeger
+#
+# Ablauf:
+#   1. Ziel-Datentraeger waehlen (mit Sicherheitsabfragen)
+#   2. GPT-Partitionierung: BIOS-Boot, EFI-Systempartition, Wurzeldateisystem
+#   3. Dateisysteme anlegen und einhaengen
+#   4. Laufendes Live-System auf den Datentraeger kopieren
+#   5. fstab, Hostname, Benutzer, Passwort einrichten
+#   6. GRUB fuer BIOS und UEFI installieren
+#   7. Aufraeumen und aushaengen
+#
+# ACHTUNG: Der Ziel-Datentraeger wird vollstaendig geloescht.
+# ---------------------------------------------------------------------------
+set -Eeuo pipefail
+umask 022
+
+PROGRAM=${0##*/}
+TARGET=${SINA_TARGET_MOUNT:-/mnt}
+MIN_DISK_GIB=8
+ESP_SIZE_MIB=512
+BIOS_SIZE_MIB=1
+
+log() { printf '\033[1m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[33mWARNUNG:\033[0m %s\n' "$*" >&2; }
+die() { printf '\033[31mFEHLER:\033[0m %s\n' "$*" >&2; exit 1; }
+
+trap 'printf "\033[31mFEHLER:\033[0m Abbruch bei Zeile %s: %s\n" "${BASH_LINENO[0]}" "${BASH_COMMAND}" >&2' ERR
+
+cleanup() {
+	local mount_point
+	set +e
+	for mount_point in "${TARGET}/run" "${TARGET}/sys" "${TARGET}/proc" \
+		"${TARGET}/dev/pts" "${TARGET}/dev" "${TARGET}/boot/efi" "${TARGET}"; do
+		if mountpoint -q "${mount_point}" 2>/dev/null; then
+			umount "${mount_point}" 2>/dev/null || umount -l "${mount_point}" 2>/dev/null
+		fi
+	done
+}
+trap cleanup EXIT
+
+# ---------------------------------------------------------------------------
+# Voraussetzungen pruefen
+# ---------------------------------------------------------------------------
+require_root() {
+	[ "$(id -u)" -eq 0 ] || die "Dieses Programm muss als root ausgefuehrt werden (sudo ${PROGRAM})."
+}
+
+require_tools() {
+	local tool
+	for tool in parted partprobe wipefs mkfs.vfat mkfs.ext4 rsync blkid chroot mountpoint \
+		lsblk udevadm findmnt; do
+		command -v "${tool}" >/dev/null 2>&1 || die "Benoetigtes Werkzeug '${tool}' fehlt."
+	done
+}
+
+check_live_environment() {
+	if [ ! -d /lib/live ] && [ ! -d /run/live ]; then
+		warn "Dieses System scheint kein laufendes Live-System zu sein."
+		warn "Die Installation von einem installierten System aus wird nicht unterstuetzt."
+	fi
+}
+
+# ---------------------------------------------------------------------------
+# Datentraeger auswaehlen
+# ---------------------------------------------------------------------------
+list_disks() {
+	lsblk -dno NAME,SIZE,TYPE,MODEL | awk '$3 == "disk" {
+		model = ""
+		for (i = 4; i <= NF; i++) model = model " " $i
+		printf "  /dev/%-14s %9s %s\n", $1, $2, model
+	}'
+}
+
+normalize_disk() {
+	case "$1" in
+		/dev/*) printf '%s\n' "$1" ;;
+		*) printf '/dev/%s\n' "$1" ;;
+	esac
+}
+
+# Liefert den Datentraeger, auf dem sich das laufende Live-Medium befindet.
+live_medium_disk() {
+	local source
+	source=$(findmnt -no SOURCE /run/live/medium 2>/dev/null || true)
+	if [ -z "${source}" ]; then
+		source=$(findmnt -no SOURCE /lib/live/mount/medium 2>/dev/null || true)
+	fi
+	if [ -z "${source}" ]; then
+		return 0
+	fi
+	lsblk -no PKNAME "${source}" 2>/dev/null | head -n 1 || true
+}
+
+select_disk() {
+	local disk choices live_disk mounted
+
+	# Die Dialogausgabe geht auf stderr, damit nur der gewaehlte Datentraeger
+	# auf stdout landet (select_disk wird per $(...) ausgewertet).
+	{
+		printf '\nVerfuegbare Datentraeger:\n'
+		list_disks
+		printf '\n'
+	} >&2
+
+	while true; do
+		printf 'Ziel-Datentraeger (z. B. sda, nvme0n1 oder /dev/sda): ' >&2
+		read -r disk || die "Keine Eingabe erhalten."
+		[ -n "${disk}" ] || continue
+		disk=$(readlink -f "$(normalize_disk "${disk}")")
+
+		if [ ! -b "${disk}" ]; then
+			warn "'${disk}' ist kein Blockgeraet."
+			continue
+		fi
+		if [ "$(lsblk -dnro TYPE "${disk}")" != "disk" ]; then
+			warn "'${disk}' ist kein vollstaendiger Datentraeger (keine Partition)."
+			continue
+		fi
+		if ! [ "$(lsblk -dnrb -o SIZE "${disk}")" -ge $((MIN_DISK_GIB * 1024 * 1024 * 1024)) ]; then
+			warn "'${disk}' ist kleiner als ${MIN_DISK_GIB} GiB."
+			continue
+		fi
+
+		live_disk=$(live_medium_disk)
+		if [ -n "${live_disk}" ] && [ "/dev/${live_disk}" = "${disk}" ]; then
+			die "${disk} ist der laufende Live-Datentraeger und kann nicht Ziel sein."
+		fi
+
+		mounted=$(lsblk -nro MOUNTPOINT "${disk}" | grep -v '^$' || true)
+		if [ -n "${mounted}" ]; then
+			warn "'${disk}' ist derzeit eingebunden:"
+			printf '%s\n' "${mounted}" | sed 's/^/    /' >&2
+			continue
+		fi
+
+		printf '\nAlle Daten auf %s (%s) werden unwiderruflich geloescht.\n' \
+			"${disk}" "$(lsblk -dnro SIZE "${disk}")" >&2
+		printf "Zum Fortfahren 'JA' eingeben: " >&2
+		read -r choices || die "Keine Eingabe erhalten."
+		[ "${choices}" = "JA" ] || die "Abgebrochen durch Benutzer."
+		printf '%s\n' "${disk}"
+		return 0
+	done
+}
+
+# ---------------------------------------------------------------------------
+# Partitionieren und formatieren
+# ---------------------------------------------------------------------------
+part_path() {
+	local disk=$1 number=$2
+	case "${disk}" in
+		*[0-9]) printf '%sp%s\n' "${disk}" "${number}" ;;
+		*) printf '%s%s\n' "${disk}" "${number}" ;;
+	esac
+}
+
+wait_for_partitions() {
+	local disk=$1 expected=$2 attempt=0
+	while [ "${attempt}" -lt 30 ]; do
+		if [ -b "$(part_path "${disk}" 1)" ] && [ -b "$(part_path "${disk}" 2)" ] &&
+			[ -b "$(part_path "${disk}" 3)" ]; then
+			return 0
+		fi
+		attempt=$((attempt + 1))
+		sleep 1
+		udevadm settle --timeout=5 >/dev/null 2>&1 || true
+	done
+	die "Partitionen auf ${disk} sind nicht erschienen (erwartet: ${expected})."
+}
+
+partition_disk() {
+	local disk=$1 esp_start esp_end
+
+	esp_start=$((BIOS_SIZE_MIB + 1))MiB
+	esp_end=$((BIOS_SIZE_MIB + ESP_SIZE_MIB + 1))MiB
+
+	log "Partitionstabelle (GPT) auf ${disk} anlegen"
+	wipefs -a "${disk}" >/dev/null
+	parted --script "${disk}" mklabel gpt
+
+	# Partition 1: BIOS-Boot-Partition (1 MiB) fuer GRUB im BIOS-Modus
+	parted --script "${disk}" mkpart sina-bios 1MiB "${esp_start}"
+	parted --script "${disk}" set 1 bios_grub on
+
+	# Partition 2: EFI-Systempartition (FAT32, 512 MiB)
+	parted --script "${disk}" mkpart sina-efi fat32 "${esp_start}" "${esp_end}"
+	parted --script "${disk}" set 2 esp on
+	parted --script "${disk}" set 2 boot on
+
+	# Partition 3: Wurzeldateisystem (restlicher Platz)
+	parted --script "${disk}" mkpart sina-root ext4 "${esp_end}" 100%
+
+	partprobe "${disk}" >/dev/null 2>&1 || true
+	udevadm settle --timeout=10 >/dev/null 2>&1 || true
+	wait_for_partitions "${disk}" "3 Partitionen"
+}
+
+format_and_mount() {
+	local disk=$1 esp root
+
+	esp=$(part_path "${disk}" 2)
+	root=$(part_path "${disk}" 3)
+
+	log "Dateisysteme anlegen (${esp}: FAT32, ${root}: ext4)"
+	mkfs.vfat -F 32 -n SINABOOT "${esp}" >/dev/null
+	mkfs.ext4 -q -F -L SINAROOT "${root}"
+
+	log "Zieldateisysteme einhaengen unter ${TARGET}"
+	mkdir -p "${TARGET}"
+	mount "${root}" "${TARGET}"
+	mkdir -p "${TARGET}/boot/efi"
+	mount "${esp}" "${TARGET}/boot/efi"
+}
+
+# ---------------------------------------------------------------------------
+# System kopieren
+# ---------------------------------------------------------------------------
+copy_system() {
+	log "Live-System nach ${TARGET} kopieren (dies dauert einige Minuten)"
+	mkdir -p "${TARGET}/dev" "${TARGET}/dev/pts" "${TARGET}/proc" "${TARGET}/sys" \
+		"${TARGET}/run" "${TARGET}/tmp"
+	chmod 1777 "${TARGET}/tmp"
+
+	rsync -aHAXx --numeric-ids --info=progress2 \
+		--exclude=/proc/ --exclude=/sys/ --exclude=/dev/ --exclude=/run/ \
+		--exclude=/tmp/ --exclude=/mnt/ --exclude=/media/ --exclude=/cdrom/ \
+		--exclude=/lost+found/ --exclude=/swapfile \
+		--exclude=/var/cache/apt/archives/ --exclude=/var/lib/apt/lists/ \
+		--exclude=/etc/sudoers.d/live --exclude=/etc/machine-id \
+		--exclude='/etc/ssh/ssh_host_*' \
+		/ "${TARGET}/"
+}
+
+write_fstab() {
+	local disk=$1 root_uuid esp_uuid
+
+	root_uuid=$(blkid -s UUID -o value "$(part_path "${disk}" 3)")
+	esp_uuid=$(blkid -s UUID -o value "$(part_path "${disk}" 2)")
+	[ -n "${root_uuid}" ] || die "UUID des Wurzeldateisystems konnte nicht ermittelt werden."
+	[ -n "${esp_uuid}" ] || die "UUID der EFI-Systempartition konnte nicht ermittelt werden."
+
+	log "fstab mit UUIDs schreiben"
+	cat >"${TARGET}/etc/fstab" <<EOF
+# /etc/fstab - erzeugt von ${PROGRAM}
+UUID=${root_uuid}	/		ext4	errors=remount-ro	0 1
+UUID=${esp_uuid}	/boot/efi	vfat	umask=0077		0 1
+EOF
+
+	# /etc/resolv.conf darf kein Verweis auf das Live-System bleiben
+	rm -f "${TARGET}/etc/resolv.conf"
+	if [ -s /etc/resolv.conf ]; then
+		cp -L /etc/resolv.conf "${TARGET}/etc/resolv.conf"
+	else
+		printf 'nameserver 1.1.1.1\nnameserver 9.9.9.9\n' >"${TARGET}/etc/resolv.conf"
+	fi
+	chmod 0644 "${TARGET}/etc/resolv.conf"
+}
+
+prepare_chroot() {
+	local dir
+	for dir in dev proc sys run; do
+		mount --bind "/${dir}" "${TARGET}/${dir}"
+	done
+	mount --bind /dev/pts "${TARGET}/dev/pts"
+}
+
+configure_system() {
+	local host input admin
+
+	printf '\n'
+	printf 'Hostname [sina-server]: '
+	read -r input || die "Keine Eingabe erhalten."
+	host=${input:-sina-server}
+	printf '%s\n' "${host}" >"${TARGET}/etc/hostname"
+	cat >"${TARGET}/etc/hosts" <<EOF
+127.0.0.1	localhost
+127.0.1.1	${host}
+::1	localhost ip6-localhost ip6-loopback
+EOF
+	log "Hostname auf '${host}' gesetzt"
+
+	printf 'Administrator-Benutzer [sina]: '
+	read -r input || die "Keine Eingabe erhalten."
+	admin=${input:-sina}
+	printf '%s\n' "${admin}" | grep -Eq '^[a-z][a-z0-9_-]{1,31}$' \
+		|| die "Ungueltiger Benutzername '${admin}'."
+
+	if chroot "${TARGET}" id -u "${admin}" >/dev/null 2>&1; then
+		log "Benutzer '${admin}' existiert bereits - Passwort wird neu gesetzt"
+		chroot "${TARGET}" passwd "${admin}"
+	else
+		log "Benutzer '${admin}' wird angelegt"
+		chroot "${TARGET}" adduser --gecos "" "${admin}"
+	fi
+	chroot "${TARGET}" usermod -aG sudo "${admin}"
+	chroot "${TARGET}" passwd -l root >/dev/null 2>&1 || true
+	log "Benutzer '${admin}' ist Mitglied der Gruppe sudo"
+}
+
+# ---------------------------------------------------------------------------
+# Bootloader und Abschluss
+# ---------------------------------------------------------------------------
+install_bootloader() {
+	local disk=$1
+
+	if [ -d "${TARGET}/usr/lib/grub/x86_64-efi" ]; then
+		log "GRUB fuer UEFI installieren"
+		# --no-nvram: im chroot ist kein Zugriff auf die Firmware-Variablen moeglich.
+		chroot "${TARGET}" grub-install --target=x86_64-efi --efi-directory=/boot/efi \
+			--bootloader-id=Sina --no-nvram --recheck
+		# Zusaetzlicher Fallback-Pfad EFI/BOOT/BOOTX64.EFI
+		chroot "${TARGET}" grub-install --target=x86_64-efi --efi-directory=/boot/efi \
+			--removable --no-nvram --recheck
+	else
+		warn "GRUB-EFI-Module fehlen im Zielsystem - UEFI-Start wird nicht eingerichtet."
+	fi
+
+	log "GRUB fuer BIOS installieren (${disk})"
+	chroot "${TARGET}" grub-install --target=i386-pc --recheck "${disk}"
+
+	log "GRUB-Konfiguration erzeugen"
+	chroot "${TARGET}" update-grub
+}
+
+finalize_system() {
+	log "Live-spezifische Einstellungen entfernen"
+	rm -f "${TARGET}/etc/sudoers.d/live"
+	rm -f "${TARGET}/etc/systemd/system/getty@tty1.service.d/autologin.conf"
+	rmdir "${TARGET}/etc/systemd/system/getty@tty1.service.d" 2>/dev/null || true
+	rm -f "${TARGET}"/etc/ssh/ssh_host_*
+
+	# Neue Maschinen-ID und neue SSH-Hostschluessel beim ersten Start
+	: >"${TARGET}/etc/machine-id"
+	rm -f "${TARGET}/var/lib/dbus/machine-id"
+
+	log "Dienste aktivieren"
+	chroot "${TARGET}" systemctl enable NetworkManager.service >/dev/null
+	chroot "${TARGET}" systemctl enable sina-serverd.service >/dev/null
+
+	log "Initramfs neu erzeugen"
+	chroot "${TARGET}" update-initramfs -u -k all
+
+	if command -v ssh-keygen >/dev/null 2>&1 && [ -x "${TARGET}/usr/bin/ssh-keygen" ]; then
+		chroot "${TARGET}" ssh-keygen -A >/dev/null 2>&1 || true
+	fi
+
+	chroot "${TARGET}" apt-get clean
+}
+
+# ---------------------------------------------------------------------------
+# Hauptablauf
+# ---------------------------------------------------------------------------
+main() {
+	local disk
+
+	require_root
+	require_tools
+	check_live_environment
+
+	printf '\033[1mSina Server - Installation auf Datentraeger\033[0m\n'
+	printf 'Ablauf: Partitionieren, Kopieren, GRUB installieren, Benutzer einrichten.\n'
+
+	disk=$(select_disk)
+
+	log "Ziel: ${disk} ($(lsblk -dnro SIZE "${disk}"))"
+	partition_disk "${disk}"
+	format_and_mount "${disk}"
+	copy_system
+	write_fstab "${disk}"
+	prepare_chroot
+	configure_system
+	install_bootloader "${disk}"
+	finalize_system
+
+	log "Aushaengen"
+	sync
+	umount -R "${TARGET}"
+
+	printf '\n\033[32mInstallation abgeschlossen.\033[0m\n'
+	printf 'Datentraeger %s ist startbereit.\n' "${disk}"
+	printf 'Bitte das Live-Medium entfernen und das System neu starten (%s).\n' "reboot"
+}
+
+main "$@"
+
+
+

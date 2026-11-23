@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""Sina Server Control API (sina-serverd).
+
+Stellt eine schlanke, ausschliesslich lesende HTTP-Schnittstelle bereit:
+
+    GET /health   -> {"status": "ok"}
+    GET /version  -> Produkt-, Versions- und Build-Informationen
+    GET /status   -> Systemstatus (Hostname, Kernel, Last, Speicher, Dienste)
+
+Der Dienst benoetigt nur die Python-Standardbibliothek (python3), laeuft als
+Systembenutzer "sina-svc" und ist standardmaessig nur auf 127.0.0.1 gebunden.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import platform
+import socket
+import subprocess
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, Dict
+
+RELEASE_FILE = os.environ.get("SINA_RELEASE_FILE", "/etc/sina/release")
+LISTEN_HOST = os.environ.get("SINA_HOST", "127.0.0.1")
+LISTEN_PORT = int(os.environ.get("SINA_PORT", "8787"))
+SERVICE_NAME = "sina-serverd"
+START_TIME = time.time()
+
+
+def read_release(path: str = RELEASE_FILE) -> Dict[str, str]:
+    """Liest /etc/sina/release im Format KEY=Wert."""
+    release: Dict[str, str] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                release[key.strip()] = value.strip()
+    except OSError:
+        pass
+    return release
+
+
+def read_memory() -> Dict[str, int]:
+    """Liest Arbeitsspeicherinformationen aus /proc/meminfo (Angaben in MiB)."""
+    values: Dict[str, int] = {}
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as handle:
+            for line in handle:
+                parts = line.split()
+                if len(parts) >= 2 and parts[0] in ("MemTotal:", "MemAvailable:"):
+                    values[parts[0].rstrip(":")] = int(parts[1]) // 1024
+    except (OSError, ValueError):
+        return {}
+    total = values.get("MemTotal", 0)
+    available = values.get("MemAvailable", 0)
+    return {
+        "total_mib": total,
+        "available_mib": available,
+        "used_mib": max(total - available, 0),
+    }
+
+
+def unit_state(unit: str) -> str:
+    """Fragt den Zustand einer systemd-Unit ab, ohne eine Exception zu werfen."""
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", unit],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        state = result.stdout.strip()
+        return state or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+def system_status() -> Dict[str, Any]:
+    release = read_release()
+    try:
+        load1, load5, load15 = os.getloadavg()
+    except OSError:
+        load1 = load5 = load15 = 0.0
+
+    return {
+        "product": release.get("PRODUCT", "Sina Server"),
+        "version": release.get("VERSION", "unknown"),
+        "edition": release.get("EDITION", "unknown"),
+        "build_id": release.get("BUILD_ID", "unknown"),
+        "hostname": socket.gethostname(),
+        "kernel": platform.release(),
+        "machine": platform.machine(),
+        "uptime_seconds": int(time.time() - START_TIME),
+        "load": {"1m": round(load1, 2), "5m": round(load5, 2), "15m": round(load15, 2)},
+        "memory": read_memory(),
+        "services": {
+            "sina-serverd": unit_state("sina-serverd.service"),
+            "NetworkManager": unit_state("NetworkManager.service"),
+        },
+        "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+
+class SinaRequestHandler(BaseHTTPRequestHandler):
+    """Behandelt die HTTP-Anfragen der Control API."""
+
+    server_version = "sina-serverd/" + read_release().get("VERSION", "0.0.0")
+    sys_version = ""
+
+    def _respond(self, status: int, payload: Dict[str, Any]) -> None:
+        body = json.dumps(payload, indent=2, sort_keys=False).encode("utf-8") + b"\n"
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:  # noqa: N802 - HTTP-Verb als Methodenname
+        path = self.path.split("?", 1)[0].rstrip("/") or "/"
+
+        if path == "/health":
+            self._respond(200, {"status": "ok", "service": SERVICE_NAME})
+        elif path == "/version":
+            release = read_release()
+            self._respond(
+                200,
+                {
+                    "product": release.get("PRODUCT", "Sina Server"),
+                    "version": release.get("VERSION", "unknown"),
+                    "edition": release.get("EDITION", "unknown"),
+                    "base": release.get("BASE_DISTRIBUTION", "unknown"),
+                    "build_id": release.get("BUILD_ID", "unknown"),
+                    "build_date": release.get("BUILD_DATE", "unknown"),
+                },
+            )
+        elif path == "/status":
+            self._respond(200, system_status())
+        elif path == "/":
+            self._respond(
+                200,
+                {
+                    "service": SERVICE_NAME,
+                    "endpoints": ["/health", "/version", "/status"],
+                },
+            )
+        else:
+            self._respond(404, {"error": "not_found", "path": path})
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+
+    def do_POST(self) -> None:  # noqa: N802
+        self._respond(405, {"error": "method_not_allowed"})
+
+    def do_PUT(self) -> None:  # noqa: N802
+        self._respond(405, {"error": "method_not_allowed"})
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        self._respond(405, {"error": "method_not_allowed"})
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+        print("[%s] %s - %s" % (stamp, self.address_string(), fmt % args), flush=True)
+
+
+def main() -> int:
+    release = read_release()
+    print(
+        "[sina-serverd] %s %s (%s) startet auf %s:%d"
+        % (
+            release.get("PRODUCT", "Sina Server"),
+            release.get("VERSION", "unknown"),
+            release.get("EDITION", "unknown"),
+            LISTEN_HOST,
+            LISTEN_PORT,
+        ),
+        flush=True,
+    )
+    server = ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), SinaRequestHandler)
+    server.daemon_threads = True
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("[sina-serverd] Beende Dienst (SIGINT)", flush=True)
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

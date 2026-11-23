@@ -1,0 +1,77 @@
+# ---------------------------------------------------------------------------
+# Sina Server 1.2.7 - Standard Edition
+# Paketliste fuer das Live-System (chroot-Stage).
+#
+# Alle Pakete sind in Ubuntu 24.04 LTS "noble" (main/universe) verfuegbar.
+# ---------------------------------------------------------------------------
+
+# --- Live-System -----------------------------------------------------------
+live-boot
+live-config
+live-config-systemd
+
+# --- Kernel und Firmware ---------------------------------------------------
+linux-image-generic
+linux-firmware
+initramfs-tools
+
+# --- Netzwerk (NetworkManager) ---------------------------------------------
+network-manager
+wpasupplicant
+rfkill
+iproute2
+iputils-ping
+dnsutils
+
+# --- Basissystem, Rechte, Benutzerverwaltung -------------------------------
+sudo
+adduser
+systemd
+systemd-sysv
+systemd-timesyncd
+dbus
+apparmor
+apt-utils
+
+# --- Administrationswerkzeuge ----------------------------------------------
+openssh-server
+ca-certificates
+curl
+wget
+python3
+rsync
+parted
+gdisk
+dosfstools
+e2fsprogs
+squashfs-tools
+xz-utils
+zstd
+tar
+gzip
+file
+less
+nano
+htop
+usbutils
+pciutils
+
+# --- Sprache, Tastatur, Zeitzone -------------------------------------------
+locales
+console-setup
+keyboard-configuration
+kbd
+tzdata
+
+# --- Bootloader und ISO-Werkzeuge (werden im Chroot benoetigt) -------------
+grub-common
+grub-efi-amd64-bin
+grub-pc-bin
+efibootmgr
+mtools
+syslinux
+syslinux-common
+isolinux
+librsvg2-bin
+xorriso
+ubuntu-keyring
