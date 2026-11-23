@@ -160,6 +160,42 @@ chmod 0755 "${LB_DIR}/auto/config" \
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Workaround fuer live-build 1:20230502
+#
+# binary_grub-efi dimensioniert das EFI-Image (efi.img) mit nur 55 KiB
+# Reserve. Bei Ubuntu mit Secure Boot (shim-signed + grub-efi-amd64-signed)
+# reicht das nicht: mcopy bricht mit "Disk full" ab. Die Reserve wird daher
+# auf 4096 KiB erhoeht. Der Patch ist idempotent und bricht sofort ab, wenn
+# das erwartete Muster in der installierten live-build-Version fehlt.
+# ---------------------------------------------------------------------------
+fix_live_build_efi_headroom() {
+	local lb_script="/usr/lib/live/build/binary_grub-efi"
+
+	if [ ! -f "${lb_script}" ]; then
+		die "live-build-Skript ${lb_script} nicht gefunden."
+	fi
+
+	if grep -q 'size / 1024 + 4096' "${lb_script}"; then
+		log "live-build: EFI-Reserve bereits auf 4096 KiB gesetzt"
+		return 0
+	fi
+
+	if grep -q 'size / 1024 + 55' "${lb_script}"; then
+		cp -a "${lb_script}" "${lb_script}.orig"
+		sed -i 's|size / 1024 + 55|size / 1024 + 4096|' "${lb_script}"
+		log "live-build: EFI-Reserve von 55 KiB auf 4096 KiB erhoeht (Workaround)"
+		return 0
+	fi
+
+	die "Workaround passt nicht zu ${lb_script} - bitte live-build-Version pruefen."
+}
+
+log "Speicherplatz vor dem Build:"
+df -h "${PROJECT_DIR}" || true
+
+fix_live_build_efi_headroom
+
 cd "${LB_DIR}"
 
 log "Arbeitsverzeichnis bereinigen (lb clean --purge)"

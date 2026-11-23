@@ -66,6 +66,7 @@ tzdata
 # --- Bootloader und ISO-Werkzeuge (werden im Chroot benoetigt) -------------
 grub-common
 grub-efi-amd64-bin
+grub-efi-ia32-bin
 grub-pc-bin
 efibootmgr
 mtools

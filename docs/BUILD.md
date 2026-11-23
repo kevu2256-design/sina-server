@@ -195,6 +195,13 @@ in der Binary-Stage bei Bedarf `shim-signed`/`grub-efi-amd64-signed` für Secure
 Boot nach. Ohne Indizes wäre das nicht möglich und Secure Boot würde ohne
 Fehlermeldung deaktiviert.
 
+**Angepasste Stelle im Build-Werkzeug:** `scripts/build-iso.sh` erhöht vor dem
+Build die Reserve für das EFI-Image in `/usr/lib/live/build/binary_grub-efi`
+von 55 KiB auf 4096 KiB (`fix_live_build_efi_headroom`). Ohne diese Anpassung
+bricht `mcopy` bei Ubuntu-Paketen mit Secure-Boot-Dateien mit `Disk full` ab.
+Der Patch ist idempotent, wird protokolliert und bricht sofort ab, wenn das
+erwartete Muster in einer anderen live-build-Version fehlt.
+
 ---
 
 ## 7. Was `validate-iso.sh` prüft
@@ -241,6 +248,7 @@ schlägt der Build fehl und es wird kein Release erstellt.
 | `debootstrap` scheitert an der Signatur | `ubuntu-keyring` fehlt oder Mirror-URL falsch (`SINA_MIRROR`) |
 | `No space left on device` | Speicher freiräumen; der Runner hat ca. 14 GB, der Build braucht ca. 6 GB |
 | `Kein UEFI-Booteintrag` | GRUB-EFI-Stage fehlgeschlagen – Build-Log ab `Begin installing grub-efi` prüfen |
+| `mcopy: Disk full` beim EFI-Image | live-build 20230502 reserviert nur 55 KiB für `efi.img`; mit Ubuntu-Secure-Boot-Dateien (shim + signierter GRUB) zu wenig. `scripts/build-iso.sh` erhöht die Reserve automatisch auf 4096 KiB (`fix_live_build_efi_headroom`) |
 | `mksquashfs: Unrecognised compressor option -Xcompression-level` | `--chroot-squashfs-compression-level` entfernen – live-build erzeugt daraus eine Option, die `mksquashfs` nur für gzip kennt |
 | Release-Job: `Resource not accessible by integration` | Job-Berechtigung `contents: write` fehlt (im Workflow gesetzt) |
 | Artifact-Upload schlägt fehl (Speicherkontingent) | Die ISO ist ca. 1,5–2 GB. Bei privaten Repositories das Actions-Speicherkontingent beachten und ggf. `retention-days` in `.github/workflows/build-iso.yml` verringern |
