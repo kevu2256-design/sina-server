@@ -243,3 +243,18 @@ fi
 log "Build abgeschlossen: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 log "Ergebnis: ${DIST_DIR}/${ISO_NAME}"
 
+# ---------------------------------------------------------------------------
+# CI-Betrieb: Der Build laeuft als root (debootstrap/chroot), die spaeteren
+# Workflow-Schritte laufen als normaler Benutzer. Deshalb werden die
+# Ergebnisdateien an den aufrufenden Benutzer uebergeben (SUDO_UID/SUDO_GID),
+# damit Pruefsumme, BUILD-INFO und Artifact-Upload ohne root schreiben koennen.
+# ---------------------------------------------------------------------------
+if [ -n "${SUDO_UID:-}" ] && [ -n "${SUDO_GID:-}" ]; then
+	chown -R "${SUDO_UID}:${SUDO_GID}" "${DIST_DIR}" 2>/dev/null || true
+	if [ -f "${LOG_FILE}" ]; then
+		chown "${SUDO_UID}:${SUDO_GID}" "${LOG_FILE}" 2>/dev/null || true
+	fi
+	log "Ergebnisdateien an UID ${SUDO_UID}/GID ${SUDO_GID} uebergeben"
+fi
+
+

@@ -248,6 +248,7 @@ schlägt der Build fehl und es wird kein Release erstellt.
 | `debootstrap` scheitert an der Signatur | `ubuntu-keyring` fehlt oder Mirror-URL falsch (`SINA_MIRROR`) |
 | `No space left on device` | Speicher freiräumen; der Runner hat ca. 14 GB, der Build braucht ca. 6 GB |
 | `Kein UEFI-Booteintrag` | GRUB-EFI-Stage fehlgeschlagen – Build-Log ab `Begin installing grub-efi` prüfen |
+| `Permission denied` bei `dist/*.sha256` | `dist/` wurde vom `sudo`-Build als root erzeugt. `scripts/build-iso.sh` übergibt die Ergebnisdateien am Ende an `SUDO_UID`/`SUDO_GID`; lokale Builds ohne `sudo` sind nicht betroffen |
 | `mcopy: Disk full` beim EFI-Image | live-build 20230502 reserviert nur 55 KiB für `efi.img`; mit Ubuntu-Secure-Boot-Dateien (shim + signierter GRUB) zu wenig. `scripts/build-iso.sh` erhöht die Reserve automatisch auf 4096 KiB (`fix_live_build_efi_headroom`) |
 | `mksquashfs: Unrecognised compressor option -Xcompression-level` | `--chroot-squashfs-compression-level` entfernen – live-build erzeugt daraus eine Option, die `mksquashfs` nur für gzip kennt |
 | Release-Job: `Resource not accessible by integration` | Job-Berechtigung `contents: write` fehlt (im Workflow gesetzt) |
