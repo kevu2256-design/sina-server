@@ -20,7 +20,10 @@ erforderlich.
 * **sudo- und Benutzerverwaltung**, Administrator-Benutzer aus dem Installer
 * **`sina`-CLI** – Status, Netzwerk, Benutzer, Dienste, Logs, Update, Installation
 * **`sina-serverd`** – Control-API (JSON, nur `127.0.0.1:8787`), gehärtete Unit
-* **`sina-installer`** – Installation vom Live-System auf einen Datenträger
+* **Grafischer Installations-Manager (Calamares)** – Sprache, Tastatur, Zeitzone,
+  Partitionierung (GPT, EFI, optional LUKS) sowie **Benutzer und Passwort**;
+  startet beim Booten automatisch. Text-Fallback: `sudo sina install --text`
+* **`sina-installer`** – textbasierter Installer (Fallback, z. B. per SSH)
 * **GRUB** für UEFI (inkl. optionalem Secure Boot) und BIOS
 
 ## Build über GitHub Actions
@@ -64,11 +67,19 @@ docs/INSTALLATION.md              Installation und erste Schritte
 ## Installation
 
 Siehe [docs/INSTALLATION.md](docs/INSTALLATION.md): ISO herunterladen,
-Prüfsumme kontrollieren, USB-Stick schreiben, booten, Live-System starten und mit
-`sudo sina install` auf einen Datenträger installieren.
+Prüfsumme kontrollieren, USB-Stick schreiben, booten. Der grafische
+Installations-Manager startet automatisch und führt durch Partitionierung,
+Benutzeranlage und Passwortvergabe.
+
+## Branding
+
+Das laufende System ist vollständig als **Sina Server** gebrandet: `os-release`,
+`lsb-release`, Bootmenü (GRUB-Eintrag „Sina Server"), Installer (Calamares) und
+Kommandozeilenwerkzeuge zeigen keinen Fremdmarken-Namen. Die technische Basis
+(Ubuntu-Paketquelle, `noble`) ist nur dort sichtbar, wo sie für Wartung und
+Build nötig ist (z. B. `dpkg -l`, Paketquellen).
 
 ## Sicherheit
-
 * Keine Passwörter oder Tokens im Repository; der Workflow nutzt nur das
   automatische `GITHUB_TOKEN` mit minimalen Rechten.
 * live-build wird versioniert und per SHA256 geprüft installiert.
