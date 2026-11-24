@@ -1,15 +1,15 @@
-# Sina Server 1.2.7 – Build-Dokumentation
+# Sina Server 1.3.0 – Build-Dokumentation
 
-Diese Dokumentation beschreibt, wie die bootfähige ISO von **Sina Server 1.2.7
+Diese Dokumentation beschreibt, wie die bootfähige ISO von **Sina Server 1.3.0
 (Standard Edition)** erzeugt wird – automatisch über GitHub Actions oder lokal
 auf einem Linux-System.
 
 | Eigenschaft | Wert |
 | --- | --- |
-| Produkt | Sina Server 1.2.7 Standard Edition |
-| ISO-Datei | `Sina-Server-1.2.7-amd64.iso` |
-| Prüfsumme | `Sina-Server-1.2.7-amd64.iso.sha256` (SHA256) |
-| Artifact-Name | `Sina-Server-1.2.7-ISO` |
+| Produkt | Sina Server 1.3.0 Standard Edition |
+| ISO-Datei | `Sina-Server-1.3.0-amd64.iso` |
+| Prüfsumme | `Sina-Server-1.3.0-amd64.iso.sha256` (SHA256) |
+| Artifact-Name | `Sina-Server-1.3.0-ISO` |
 | Basis | Ubuntu 24.04 LTS (noble), amd64 |
 | Bootloader | isolinux/syslinux (BIOS) + GRUB (UEFI, Secure Boot optional) |
 | Build-Werkzeug | live-build `1:20230502` (Debian), per SHA256 geprüft |
@@ -21,7 +21,7 @@ auf einem Linux-System.
 
 ```
 .github/workflows/build-iso.yml      CI/CD-Pipeline (Build, Prüfung, Artifact, Release)
-VERSION                              Einzige Quelle der Versionsnummer (1.2.7)
+VERSION                              Einzige Quelle der Versionsnummer (1.3.0)
 
 iso/                                 live-build-Projektverzeichnis
 ├── auto/config                      vollständige lb-config-Konfiguration
@@ -60,9 +60,40 @@ GitHub Actions reproduzierbar.
 | sudo/Benutzerverwaltung | Pakete `sudo`, `adduser`, `passwd`; Live-Benutzer `sina` mit `sudo`-Gruppe |
 | Sina-CLI | `/usr/local/bin/sina` (Status, Netzwerk, Benutzer, Dienste, Doctor, Update, Install) |
 | Sina Server Dienst | `/usr/local/bin/sina-serverd` (Python, nur 127.0.0.1:8787), Unit `sina-serverd.service` |
-| Installer | `/usr/local/sbin/sina-installer` (Partitionierung, Kopie, GRUB, Benutzer) |
+| Installer (grafisch) | Calamares: `/etc/calamares/` (Einstellungen, Module, Branding `sina`), startet automatisch auf Konsole 1 |
+| Installer (Text-Fallback) | `/usr/local/sbin/sina-installer` (Partitionierung, Kopie, GRUB, Benutzer) |
+| Grafik-Basis | `xserver-xorg-core`, `xserver-xorg-input-libinput`, `xinit`, `openbox`, `fonts-dejavu-core` |
 | GRUB/Boot | `--bootloaders "syslinux,grub-efi"`, `--uefi-secure-boot auto` |
 | Live-System | `live-boot`, `live-config`, `live-config-systemd`, `--initramfs live-boot` |
+
+---
+
+## 2.1 Installations-Manager (Calamares)
+
+Beim Booten des Live-Systems startet auf **Konsole 1** automatisch der grafische
+Installer (`sina-setup.service` → `sina-setup-session` → `xinit` + Openbox →
+`calamares`). Eine Shell bleibt auf **Konsole 2** (Strg+Alt+F2) erreichbar,
+alternativ `sudo sina install --text`.
+
+Ablauf im Installer: Sprache → Tastatur → Zeitzone → **Partitionierung**
+(GPT, EFI-Systempartition unter `/boot/efi`, ext4, optional LUKS) → **Benutzer
+und Passwort** (Mitglied der Gruppe `sudo`, optionales Autologin) → Zusammenfassung
+→ Installation (Entpacken, GRUB für UEFI/BIOS, Dienste aktivieren) → Neustart.
+
+| Datei | Zweck |
+| --- | --- |
+| `etc/calamares/settings.conf` | Reihenfolge der Seiten und Ausführungsschritte |
+| `etc/calamares/modules/unpackfs.conf` | Quelle `/run/live/medium/live/filesystem.squashfs` (live-boot) |
+| `etc/calamares/modules/partition.conf` | EFI-Partition `/boot/efi`, ext4, Swap-Auswahl |
+| `etc/calamares/modules/users.conf` | Benutzer, `sudo`-Gruppe, Passwort-Mindestlänge 6, kein Root-Passwort |
+| `etc/calamares/modules/services-systemd.conf` | aktiviert NetworkManager, `sina-serverd`, SSH, Zeitsynchronisation |
+| `etc/calamares/modules/shellprocess_sina_cleanup.conf` | entfernt Live-Reste (Autologin, `/etc/sudoers.d/live`, `sina-setup`), erzeugt neue SSH-Hosts |
+| `etc/calamares/modules/bootloader.conf` | GRUB-Installation, EFI-Verzeichnis `EFI/sina` |
+| `etc/calamares/branding/sina/` | Branding (`branding.desc`, Logo/Begrüßungsbild ohne Fremdmarken) |
+
+Alle Calamares-Konfigurationen werden im Build-Hook per `python3-yaml`
+validiert; fehlerhaftes YAML bricht den Build ab. Die Bilder werden mit
+`scripts/gen-branding.py` erzeugt (ohne externe Abhängigkeiten).
 
 ---
 
@@ -74,10 +105,10 @@ GitHub Actions reproduzierbar.
 | --- | --- | --- |
 | Manuell | Actions → „Sina Server ISO“ → *Run workflow* | ISO + Artifact |
 | Push | Push auf `main` | ISO + Artifact |
-| Tag | Push eines Tags `v*.*.*` (z. B. `v1.2.7`) | ISO + Artifact **und** GitHub Release |
+| Tag | Push eines Tags `v*.*.*` (z. B. `v1.3.0`) | ISO + Artifact **und** GitHub Release |
 
 Bei einem Tag prüft der Workflow zuerst, ob der Tag exakt zu `VERSION` passt
-(`v1.2.7` ⇔ `VERSION` enthält `1.2.7`). Bei Abweichung bricht der Lauf mit einer
+(`v1.3.0` ⇔ `VERSION` enthält `1.3.0`). Bei Abweichung bricht der Lauf mit einer
 klaren Fehlermeldung ab, damit keine falsch benannte Version veröffentlicht wird.
 
 Ablauf der Jobs:
@@ -92,7 +123,7 @@ Ablauf der Jobs:
    7. `scripts/validate-iso.sh … --require-efi` – prüft Bootfähigkeit und Inhalt
    8. `scripts/generate-checksum.sh` – erzeugt und verifiziert die SHA256-Datei
    9. `BUILD-INFO.txt` und `RELEASE-NOTES.md` erzeugen
-   10. `Sina-Server-1.2.7-ISO` als Artifact hochladen
+   10. `Sina-Server-1.3.0-ISO` als Artifact hochladen
    11. Bei Fehlschlag: `build.log` als Artifact `…-build-log` hochladen
 2. **release** (nur bei Tags, Rechte `contents: write`)
    1. Artifact herunterladen
@@ -114,11 +145,11 @@ Die Version steht **nur** in der Datei `VERSION`. Sie wird verwendet für:
 Neue Version veröffentlichen:
 
 ```bash
-echo "1.2.8" > VERSION          # Version erhöhen
-git commit -am "Version 1.2.8"
-git push origin main            # baut 1.2.8 als Artifact
-git tag -a v1.2.8 -m "Sina Server 1.2.8"
-git push origin v1.2.8          # baut 1.2.8 und erstellt das Release
+echo "1.3.1" > VERSION          # Version erhöhen
+git commit -am "Version 1.3.1"
+git push origin main            # baut 1.3.1 als Artifact
+git tag -a v1.3.1 -m "Sina Server 1.3.1"
+git push origin v1.3.1          # baut 1.3.1 und erstellt das Release
 ```
 
 Weitere Anpassungen sind nicht nötig – Workflow, Dateinamen und Release-Titel
@@ -154,15 +185,15 @@ sudo -E bash scripts/build-iso.sh
 
 # 5. Ergebnis
 ls -l dist/
-#   Sina-Server-1.2.7-amd64.iso
-#   Sina-Server-1.2.7-amd64.iso.sha256
+#   Sina-Server-1.3.0-amd64.iso
+#   Sina-Server-1.3.0-amd64.iso.sha256
 ```
 
 Einzelne Schritte sind auch separat ausführbar:
 
 ```bash
-bash scripts/validate-iso.sh dist/Sina-Server-1.2.7-amd64.iso --require-efi
-bash scripts/generate-checksum.sh dist/Sina-Server-1.2.7-amd64.iso
+bash scripts/validate-iso.sh dist/Sina-Server-1.3.0-amd64.iso --require-efi
+bash scripts/generate-checksum.sh dist/Sina-Server-1.3.0-amd64.iso
 sudo -E bash scripts/build-iso.sh --no-verify   # ohne Prüfung/Prüfsumme
 ```
 
@@ -255,7 +286,7 @@ schlägt der Build fehl und es wird kein Release erstellt.
 | Artifact-Upload schlägt fehl (Speicherkontingent) | Die ISO ist ca. 1,5–2 GB. Bei privaten Repositories das Actions-Speicherkontingent beachten und ggf. `retention-days` in `.github/workflows/build-iso.yml` verringern |
 
 Build-Protokoll: `build.log` im Projektverzeichnis (lokal) bzw. Artifact
-`Sina-Server-1.2.7-build-log` (GitHub Actions).
+`Sina-Server-1.3.0-build-log` (GitHub Actions).
 
 ---
 

@@ -1,12 +1,12 @@
-# Sina Server 1.2.7 – Installation
+# Sina Server 1.3.0 – Installation
 
 Diese Anleitung beschreibt Download, Prüfung, Start und Installation von
-**Sina Server 1.2.7 (Standard Edition)**.
+**Sina Server 1.3.0 (Standard Edition)**.
 
 | Eigenschaft | Wert |
 | --- | --- |
-| Datei | `Sina-Server-1.2.7-amd64.iso` (ca. 1,5–2 GB) |
-| Prüfsumme | `Sina-Server-1.2.7-amd64.iso.sha256` |
+| Datei | `Sina-Server-1.3.0-amd64.iso` (ca. 1,5–2 GB) |
+| Prüfsumme | `Sina-Server-1.3.0-amd64.iso.sha256` |
 | Architektur | amd64 (x86-64) |
 | Start | UEFI und BIOS/Legacy |
 | Live-Benutzer | `sina` (automatische Anmeldung an der Konsole) |
@@ -27,15 +27,15 @@ Diese Anleitung beschreibt Download, Prüfung, Start und Installation von
 **Variante A – GitHub Actions (Entwicklungsbuild):**
 
 1. Repository → *Actions* → Workflow **Sina Server ISO** → gewünschter Lauf
-2. Abschnitt *Artifacts* → `Sina-Server-1.2.7-ISO` herunterladen
+2. Abschnitt *Artifacts* → `Sina-Server-1.3.0-ISO` herunterladen
 3. Archiv entpacken; enthalten sind
-   * `Sina-Server-1.2.7-amd64.iso`
-   * `Sina-Server-1.2.7-amd64.iso.sha256`
+   * `Sina-Server-1.3.0-amd64.iso`
+   * `Sina-Server-1.3.0-amd64.iso.sha256`
    * `BUILD-INFO.txt`
 
 **Variante B – GitHub Release (veröffentlichter Stand):**
 
-Repository → *Releases* → `v1.2.7` → Dateien herunterladen.
+Repository → *Releases* → `v1.3.0` → Dateien herunterladen.
 
 ---
 
@@ -44,29 +44,29 @@ Repository → *Releases* → `v1.2.7` → Dateien herunterladen.
 Die Prüfsummendatei enthält Hash und Dateinamen:
 
 ```
-<sha256>  Sina-Server-1.2.7-amd64.iso
+<sha256>  Sina-Server-1.3.0-amd64.iso
 ```
 
 **Linux:**
 
 ```bash
 cd <download-verzeichnis>
-sha256sum -c Sina-Server-1.2.7-amd64.iso.sha256
-# Erwartete Ausgabe: Sina-Server-1.2.7-amd64.iso: OK
+sha256sum -c Sina-Server-1.3.0-amd64.iso.sha256
+# Erwartete Ausgabe: Sina-Server-1.3.0-amd64.iso: OK
 ```
 
 **macOS:**
 
 ```bash
 cd <download-verzeichnis>
-shasum -a 256 -c Sina-Server-1.2.7-amd64.iso.sha256
+shasum -a 256 -c Sina-Server-1.3.0-amd64.iso.sha256
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-Get-FileHash .\Sina-Server-1.2.7-amd64.iso -Algorithm SHA256
-# Hash mit dem Inhalt von Sina-Server-1.2.7-amd64.iso.sha256 vergleichen
+Get-FileHash .\Sina-Server-1.3.0-amd64.iso -Algorithm SHA256
+# Hash mit dem Inhalt von Sina-Server-1.3.0-amd64.iso.sha256 vergleichen
 ```
 
 Stimmt die Prüfsumme nicht, die Datei erneut herunterladen – nicht verwenden.
@@ -78,7 +78,7 @@ Stimmt die Prüfsumme nicht, die Datei erneut herunterladen – nicht verwenden.
 **Windows – Rufus:**
 
 1. Rufus starten, USB-Stick wählen
-2. *Startart* → ISO-Abbild → `Sina-Server-1.2.7-amd64.iso`
+2. *Startart* → ISO-Abbild → `Sina-Server-1.3.0-amd64.iso`
 3. Partitionsschema: *GPT* (für UEFI) bzw. *MBR* (für reine BIOS-Systeme)
 4. *Start* → Datenverlust bestätigen
 
@@ -88,7 +88,7 @@ Stimmt die Prüfsumme nicht, die Datei erneut herunterladen – nicht verwenden.
 
 ```bash
 lsblk                                  # Zielgerät ermitteln, z. B. /dev/sdX
-sudo dd if=Sina-Server-1.2.7-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync
+sudo dd if=Sina-Server-1.3.0-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync
 sync
 ```
 
@@ -104,19 +104,26 @@ sync
    * **Sina Server starten (abgesicherter Modus)** – ohne Grafik-/Treibertuning
 
 **Secure Boot:** Das Abbild wird mit GRUB gebaut; signierte Shim-/GRUB-Pakete
-werden eingebunden, wenn sie im Ubuntu-Archiv verfügbar sind. Startet das System
+werden eingebunden, wenn signierte Shim-/GRUB-Pakete in der Paketquelle verfügbar sind. Startet das System
 trotzdem nicht, Secure Boot im BIOS/UEFI vorübergehend deaktivieren.
 
 ---
 
-## 6. Live-System bedienen
+## 6. Live-System und Installations-Manager
 
-Nach dem Start wird `sina` an der Konsole automatisch angemeldet. Prüfen:
+Nach dem Start erscheint auf **Konsole 1** automatisch der grafische
+Installations-Manager (Calamares). Er fuehrt durch Sprache, Tastatur, Zeitzone,
+Partitionierung sowie Benutzer- und Passwortvergabe.
+
+Zusaetzlich steht eine Shell auf **Konsole 2** bereit: `Strg+Alt+F2`
+(Anmeldung als Benutzer `sina`).
+
+Dort stehen die Sina-Befehle zur Verfuegung:
 
 ```bash
 sina version      # Produkt, Edition, Basis, Build-Informationen
 sina status       # Dienste, Netzwerk, Ressourcen
-sina doctor       # Prüfliste mit OK/WARN/FEHL
+sina doctor       # Pruefliste mit OK/WARN/FEHL
 ```
 
 Netzwerk (NetworkManager):
@@ -127,57 +134,43 @@ sina net wifi                   # WLAN-Netze suchen
 sudo sina net connect "MeinWLAN"  # Passwort wird interaktiv abgefragt
 ```
 
-> Die Live-Sitzung arbeitet ohne Passwort (automatische Anmeldung, `sudo` ohne
-> Passwort). Das ist bei Live-Medien üblich – das System ist während der
-> Live-Sitzung nicht gegen physischen Zugriff geschützt.
+> Die Live-Sitzung arbeitet ohne Passwort (automatische Anmeldung). Das ist bei
+> Live-Medien ueblich; die Installation vergibt einen eigenen Benutzer mit
+> Passwort.
 
-Weitere Befehle: `sina help`.
+## 7. Installation auf einen Datenträger
 
----
-
-## 7. Auf einen Datenträger installieren
-
-> **Achtung:** Der gewählte Datenträger wird vollständig gelöscht. Vorher alle
-> Daten sichern. Die Installation ersetzt vorhandene Betriebssysteme
+> **Achtung:** Der gewählte Datenträger wird vollständig gelöscht. Vorher
+> alle Daten sichern. Die Installation ersetzt vorhandene Betriebssysteme
 > (kein Dual-Boot).
 
-```bash
-sudo sina install
-```
-
-Ablauf des Installers (`sina-installer`):
-
-1. **Datenträger wählen:** verfügbare Datenträger werden aufgelistet; Name
-   eingeben (z. B. `sda` oder `nvme0n1`). Zur Bestätigung muss `JA` getippt
-   werden. Der laufende USB-Stick kann nicht Ziel sein und wird abgelehnt.
-2. **Partitionierung (GPT):**
-   * Partition 1: 1 MiB BIOS-Boot-Partition (GRUB im BIOS-Modus)
-   * Partition 2: 512 MiB EFI-Systempartition (FAT32)
-   * Partition 3: restlicher Platz als ext4-Wurzeldateisystem
-3. **Dateisysteme** werden formatiert und eingebunden.
-4. **Kopie:** das laufende Live-System wird auf den Datenträger kopiert
-   (`rsync`, inklusive Rechte, ACLs und xattrs).
-5. **Grundkonfiguration:**
-   * Hostname (Standard: `sina-server`)
-   * Administrator-Benutzer (Standard: `sina`) inkl. Passwortvergabe
-   * `root`-Konto wird gesperrt (`sudo` wird verwendet)
-   * `fstab` mit UUIDs, `/etc/hosts`, `/etc/resolv.conf`
-6. **GRUB** wird für UEFI (`EFI/Sina` und Fallback `EFI/BOOT/BOOTX64.EFI`) und
-   BIOS installiert; `update-grub` erzeugt die Konfiguration.
-7. **Abschluss:** Autologin und Live-sudoers-Regel werden entfernt, neue
-   `machine-id`, neue SSH-Hostschlüssel, Initramfs neu erzeugt, Datenträger
-   ausgehängt.
-
-Zum Abschluss:
+Der Installer startet automatisch. Manuell (z. B. nach Abbruch) starten mit:
 
 ```bash
-sudo reboot
+sudo sina install           # grafischer Installer
+sudo sina install --text    # textbasierter Installer (Fallback, z. B. per SSH)
 ```
 
-USB-Stick entfernen und im BIOS/UEFI den installierten Datenträger als
-Startmedium wählen.
+Seiten des grafischen Installers:
 
----
+1. **Willkommen** – Systemprüfung (RAM, Datenträger, Rechte), Sprachauswahl
+2. **Ort und Zeitzone** – Region/Zeitzone, Sprachpakete
+3. **Tastatur** – Layout (Standard: Deutsch), Testfeld
+4. **Partitionierung**
+   * *Datenträger löschen und installieren* (empfohlen): GPT mit
+     EFI-Systempartition unter `/boot/efi` (300 MiB) und ext4-Wurzeldateisystem
+   * *Manuell partitionieren*, optional verschlüsselt (LUKS)
+   * Swap: keine / kleine Partition / Auslagerungsdatei
+5. **Benutzer und Passwort**
+   * Vollständiger Name, Benutzername, Hostname
+   * Passwort (mindestens 6 Zeichen) und Wiederholung
+   * Der Benutzer ist Mitglied der Gruppe `sudo`; das `root`-Konto bleibt gesperrt
+6. **Zusammenfassung** – alle Angaben prüfen, dann *Installieren*
+7. **Installation** – Live-Dateisystem entpacken, GRUB für UEFI und BIOS
+   installieren, Dienste aktivieren, Live-Reste entfernen
+8. **Fertig** – Neustart (Medium entfernen)
+
+Dauer: je nach Datenträger etwa 5 bis 15 Minuten.
 
 ## 8. Erster Start des installierten Systems
 

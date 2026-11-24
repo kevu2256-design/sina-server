@@ -1,0 +1,42 @@
+---
+# ---------------------------------------------------------------------------
+# Sina Server - Calamares-Branding (keine Fremdmarken)
+# ---------------------------------------------------------------------------
+componentName:  sina
+
+welcomeStyleCalamares:   false
+welcomeExpandingLogo:    true
+
+windowExpanding:    normal
+windowSize: 900px,620px
+windowPlacement: center
+
+sidebar: widget
+navigation: widget
+
+strings:
+    productName:         "Sina Server"
+    shortProductName:    Sina
+    version:             1.3.0
+    shortVersion:        1.3
+    versionedName:       Sina Server 1.3.0 (Standard Edition)
+    shortVersionedName:  Sina 1.3
+    bootloaderEntryName: Sina Server
+    productUrl:          https://github.com/kevu2256-design/sina-server
+    supportUrl:          https://github.com/kevu2256-design/sina-server/issues
+    knownIssuesUrl:      https://github.com/kevu2256-design/sina-server/issues
+    releaseNotesUrl:     https://github.com/kevu2256-design/sina-server/releases
+    donateUrl:           https://github.com/kevu2256-design/sina-server
+
+images:
+    productIcon:         "icon.png"
+    productLogo:         "logo.png"
+    productWelcome:      "welcome.png"
+
+style:
+   SidebarBackground:        "#122B45"
+   SidebarText:              "#FFFFFF"
+   SidebarTextCurrent:       "#122B45"
+   SidebarBackgroundCurrent: "#2E9BD6"
+
+# Kein eigener Slideshow-QML: Calamares zeigt die Fortschrittsseite.

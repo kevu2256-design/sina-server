@@ -1,0 +1,5 @@
+# Openbox-Autostart der Live-Sitzung: grafischer Sina-Installer.
+# Nach dem Beenden von Calamares wird die X-Sitzung beendet.
+calamares --debug 2>&1 | tee -a /var/log/sina/calamares.log
+
+pkill -x openbox

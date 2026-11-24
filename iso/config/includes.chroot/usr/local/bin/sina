@@ -264,9 +264,24 @@ cmd_update() {
 }
 
 cmd_install() {
+	local mode=${1:-gui}
+
 	[ -x /usr/local/sbin/sina-installer ] || die "sina-installer wurde nicht gefunden."
 	require_root install
-	exec /usr/local/sbin/sina-installer "$@"
+
+	# Textmodus: --text (z. B. per SSH oder wenn X nicht startet)
+	if [ "${mode}" = "--text" ]; then
+		exec /usr/local/sbin/sina-installer
+	fi
+
+	# Grafischer Installer (Calamares) auf der Konsole
+	if [ -x /usr/bin/calamares ] && [ -x /usr/bin/xinit ] && [ -x /usr/local/bin/sina-setup-session ] &&
+		[ -z "${SSH_CONNECTION:-}" ]; then
+		exec /usr/local/bin/sina-setup-session
+	fi
+
+	warn "Grafischer Installer nicht verfuegbar (oder SSH-Sitzung) - starte textbasierten Installer."
+	exec /usr/local/sbin/sina-installer
 }
 
 cmd_doctor() {
@@ -358,11 +373,12 @@ Befehle:
                               Dienste steuern (sina-serverd, NetworkManager)
   logs [-f]                   Log des Sina-Server-Dienstes anzeigen
   update                      System aktualisieren (apt dist-upgrade)
-  install                     Sina Server auf einen Datentraeger installieren
+  install [--text]            Grafischer Installations-Manager (--text: Textmodus)
   help                        Diese Hilfe
 
 Beispiele:
   sudo ${PROGRAM} install
+  sudo ${PROGRAM} install --text
   sudo ${PROGRAM} net connect MeinWLAN
   sudo ${PROGRAM} user add admin --admin
   ${PROGRAM} doctor

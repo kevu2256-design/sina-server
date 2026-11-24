@@ -1,0 +1,25 @@
+[Unit]
+Description=Sina Server Setup (grafischer Installer)
+Documentation=file:///usr/share/doc/sina-server/INSTALLATION.md
+# Der Installer belegt die erste Konsole; eine Shell bleibt auf tty2 erreichbar.
+Conflicts=getty@tty1.service
+After=live-config.service systemd-user-sessions.service
+Before=getty@tty2.service
+
+[Service]
+Type=idle
+ExecStart=/usr/local/bin/sina-setup-session
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+# Bei Abbruch nicht endlos neu starten (max. ein Wiederholungsversuch)
+Restart=on-failure
+RestartSec=5s
+StartLimitBurst=2
+StartLimitIntervalSec=120
+
+[Install]
+WantedBy=multi-user.target

@@ -27,10 +27,15 @@ install -d -m 0750 -o sina-svc -g sina-svc /var/log/sina
 
 # --- Rechte ---------------------------------------------------------------
 chown root:root /usr/local/bin/sina /usr/local/bin/sina-serverd \
-	/usr/local/sbin/sina-installer
+	/usr/local/sbin/sina-installer /usr/local/bin/sina-setup-session
 chmod 0755 /usr/local/bin/sina /usr/local/bin/sina-serverd \
-	/usr/local/sbin/sina-installer
-chmod 0644 /etc/sina/release
+	/usr/local/sbin/sina-installer /usr/local/bin/sina-setup-session
+chmod 0644 /etc/sina/release /etc/os-release /etc/lsb-release
+if [ -f /root/.config/openbox/autostart ]; then
+	chown -R root:root /root/.config
+	chmod 0700 /root/.config /root/.config/openbox
+	chmod 0644 /root/.config/openbox/autostart
+fi
 
 if [ -d /usr/share/doc/sina-server ]; then
 	chmod 0644 /usr/share/doc/sina-server/* 2>/dev/null || true
@@ -39,6 +44,7 @@ fi
 # --- Syntaxpruefung der ausgelieferten Skripte ----------------------------
 echo "Pruefe Sina-CLI und Installer"
 bash -n /usr/local/bin/sina
+bash -n /usr/local/bin/sina-setup-session
 bash -n /usr/local/sbin/sina-installer
 python3 -c "import py_compile; py_compile.compile('/usr/local/bin/sina-serverd', cfile='/tmp/sina-serverd.pyc', doraise=True)"
 
@@ -46,6 +52,49 @@ python3 -c "import py_compile; py_compile.compile('/usr/local/bin/sina-serverd',
 systemctl enable NetworkManager.service
 systemctl enable sina-serverd.service
 systemctl enable systemd-timesyncd.service >/dev/null 2>&1 || true
+# Grafischer Installations-Manager auf Konsole 1
+systemctl enable sina-setup.service
+
+# --- Grafischer Installer (Calamares) pruefen -----------------------------
+echo "Pruefe Installations-Manager (Calamares)"
+for required in /usr/bin/calamares /usr/bin/xinit /usr/bin/openbox-session; do
+	if [ ! -x "${required}" ]; then
+		echo "FEHLER: ${required} fehlt - Paketliste pruefen" >&2
+		exit 1
+	fi
+done
+for required in /etc/calamares/settings.conf \
+	/etc/calamares/modules/unpackfs.conf \
+	/etc/calamares/branding/sina/branding.desc \
+	/etc/calamares/branding/sina/logo.png \
+	/etc/calamares/branding/sina/welcome.png; do
+	if [ ! -e "${required}" ]; then
+		echo "FEHLER: ${required} fehlt" >&2
+		exit 1
+	fi
+done
+
+python3 - <<'PYCHECK'
+import glob
+import sys
+import yaml
+
+files = (["/etc/calamares/settings.conf"]
+         + sorted(glob.glob("/etc/calamares/modules/*.conf"))
+         + sorted(glob.glob("/etc/calamares/branding/*/branding.desc")))
+failed = 0
+for path in files:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            yaml.safe_load(handle)
+    except Exception as exc:  # noqa: BLE001 - Build soll mit Meldung abbrechen
+        print(f"FEHLER: {path}: {exc}", file=sys.stderr)
+        failed = 1
+if failed:
+    sys.exit(1)
+print(f"  {len(files)} Calamares-Konfigurationsdateien sind gueltiges YAML")
+PYCHECK
+
 
 # --- Live-spezifische Reste entfernen -------------------------------------
 rm -f /etc/machine-id

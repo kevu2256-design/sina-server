@@ -1,16 +1,16 @@
 # Sina Server
 
-**Sina Server 1.2.7 – Standard Edition** ist ein bootfähiges Server-Betriebssystem
+**Sina Server 1.3.0 – Standard Edition** ist ein bootfähiges Server-Betriebssystem
 auf Basis von **Ubuntu 24.04 LTS (noble, amd64)**. Die ISO wird vollständig
 automatisch in GitHub Actions gebaut – ein lokales Linux ist dafür nicht
 erforderlich.
 
 | | |
 | --- | --- |
-| Version | `1.2.7` (Datei `VERSION`) |
-| ISO | `Sina-Server-1.2.7-amd64.iso` |
-| Prüfsumme | `Sina-Server-1.2.7-amd64.iso.sha256` |
-| Artifact | `Sina-Server-1.2.7-ISO` |
+| Version | `1.3.0` (Datei `VERSION`) |
+| ISO | `Sina-Server-1.3.0-amd64.iso` |
+| Prüfsumme | `Sina-Server-1.3.0-amd64.iso.sha256` |
+| Artifact | `Sina-Server-1.3.0-ISO` |
 | Start | UEFI (GRUB) und BIOS (isolinux) |
 
 ## Bestandteile des Images
@@ -29,10 +29,10 @@ erforderlich.
 | --- | --- |
 | Actions → *Sina Server ISO* → *Run workflow* | ISO als Artifact |
 | Push auf `main` | ISO als Artifact |
-| Tag `v1.2.7` | ISO als Artifact **und** GitHub Release |
+| Tag `v1.3.0` | ISO als Artifact **und** GitHub Release |
 
 Nach dem Lauf steht die ISO unter **Actions → Lauf → Artifacts →
-`Sina-Server-1.2.7-ISO`** bereit.
+`Sina-Server-1.3.0-ISO`** bereit.
 
 ## Lokaler Build
 

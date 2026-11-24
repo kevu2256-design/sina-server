@@ -14,4 +14,5 @@ VERSION         text eol=lf
 
 # Binaere Artefakte nicht konvertieren
 *.iso           binary
+*.png           binary
 *.sha256        text eol=lf

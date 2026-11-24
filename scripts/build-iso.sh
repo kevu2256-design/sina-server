@@ -83,7 +83,9 @@ fi
 
 # CRLF-Zeilenenden wuerden Shebangs und Hooks unbrauchbar machen.
 if grep -lU $'\r' "${PROJECT_DIR}"/scripts/*.sh "${LB_DIR}/auto/config" \
-	"${LB_DIR}"/config/hooks/live/* >/dev/null 2>&1; then
+	"${LB_DIR}"/config/hooks/live/* \
+	"${LB_DIR}"/config/includes.chroot/usr/local/bin/* \
+	"${LB_DIR}"/config/includes.chroot/usr/local/sbin/* >/dev/null 2>&1; then
 	die "Skripte enthalten CRLF-Zeilenenden. Bitte 'dos2unix' bzw. .gitattributes (eol=lf) verwenden."
 fi
 
@@ -133,7 +135,8 @@ PRODUCT=Sina Server
 VERSION=${VERSION}
 EDITION=${EDITION}
 CODENAME=standard
-BASE_DISTRIBUTION=Ubuntu 24.04 LTS (${DISTRO})
+BASE_DISTRIBUTION=Sina Server ${VERSION} (Standard Edition)
+BASE_CODENAME=${DISTRO}
 BASE_ARCH=${ARCH}
 BUILD_ID=${BUILD_ID}
 BUILD_DATE=${BUILD_DATE}

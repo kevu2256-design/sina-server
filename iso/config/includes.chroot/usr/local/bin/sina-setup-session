@@ -1,0 +1,27 @@
+#!/bin/bash
+# ---------------------------------------------------------------------------
+# sina-setup-session - startet den grafischen Installer (Calamares) auf tty1
+#
+# Wird von sina-setup.service beim Booten des Live-Systems gestartet.
+# Calamares laeuft als root in einer X-Sitzung mit Openbox (Fensterverwaltung
+# fuer Fokus/Dialoge); Calamares selbst wird per Openbox-Autostart gestartet.
+# ---------------------------------------------------------------------------
+set -u
+
+LOG_DIR=/var/log/sina
+LOG_FILE="${LOG_DIR}/calamares.log"
+mkdir -p "${LOG_DIR}"
+
+if [ ! -x /usr/bin/xinit ] || [ ! -x /usr/bin/calamares ]; then
+	printf 'FEHLER: Grafischer Installer (calamares/xinit) ist nicht installiert.\n' | tee -a "${LOG_FILE}" >&2
+	printf 'Fallback: textbasierter Installer startet in 5 Sekunden.\n' | tee -a "${LOG_FILE}" >&2
+	sleep 5
+	exec /usr/local/sbin/sina-installer
+fi
+
+if [ ! -x /usr/bin/openbox-session ]; then
+	# Ohne Fensterverwaltung direkt starten (Calamares im Vollbild)
+	exec xinit /usr/bin/calamares -- :0 -br -nolisten tcp vt1
+fi
+
+exec xinit /usr/bin/openbox-session -- :0 -br -nolisten tcp vt1

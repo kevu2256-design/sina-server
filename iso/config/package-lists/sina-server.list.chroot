@@ -63,6 +63,25 @@ keyboard-configuration
 kbd
 tzdata
 
+# --- Grafischer Installer (Calamares) --------------------------------------
+calamares
+python3-yaml
+squashfs-tools
+os-prober
+
+# --- Grafik-Basis fuer den Installer (X + Fensterverwaltung) ----------------
+xserver-xorg-core
+xserver-xorg-input-libinput
+xserver-xorg-video-vesa
+xinit
+xauth
+x11-xserver-utils
+openbox
+dbus-x11
+fonts-dejavu-core
+fontconfig
+libqt5svg5
+
 # --- Bootloader und ISO-Werkzeuge (werden im Chroot benoetigt) -------------
 grub-common
 grub-efi-amd64-bin
